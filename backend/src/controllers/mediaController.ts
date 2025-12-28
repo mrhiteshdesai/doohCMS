@@ -85,7 +85,8 @@ export const getLibrary = async (req: Request, res: Response) => {
     const files = await mediaService.getFiles(tenantId, folderId as string, search as string);
     const allFolders = await mediaService.getFolders(tenantId); 
     
-    const currentFolders = allFolders.filter(f => f.parentId === (folderId || null));
+    const targetFolderId = (folderId as string) || null;
+    const currentFolders = allFolders.filter(f => f.parentId === targetFolderId);
 
     res.json({ folders: currentFolders, files });
   } catch (error: any) {

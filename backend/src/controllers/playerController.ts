@@ -89,8 +89,8 @@ export const submitProofOfPlay = async (req: Request, res: Response) => {
     }
 
     // Filter out invalid logs (orphaned media or playlists) to prevent foreign key violations
-    const uniqueMediaIds = [...new Set(logs.map((l: any) => l.mediaId).filter(Boolean))];
-    const uniquePlaylistIds = [...new Set(logs.map((l: any) => l.playlistId).filter(Boolean))];
+    const uniqueMediaIds = [...new Set(logs.map((l: any) => l.mediaId).filter(Boolean))] as string[];
+    const uniquePlaylistIds = [...new Set(logs.map((l: any) => l.playlistId).filter(Boolean))] as string[];
 
     const validMedia = await prisma.mediaFile.findMany({
       where: { id: { in: uniqueMediaIds } },
