@@ -1,0 +1,868 @@
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import api from '../services/api';
+import { getPlaylists, Playlist } from '../services/playlist';
+import PlaylistThumbnail from '../components/PlaylistThumbnail';
+import PermissionGuard from '../components/PermissionGuard';
+import { 
+  Monitor, Activity, Terminal, Camera, RefreshCw, Power, ArrowLeft, 
+  Clock, Save, FileText, Database, PlaySquare, Settings, Download, 
+  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const ScreenDetails = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [screen, setScreen] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [browserSettings, setBrowserSettings] = useState<any>({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
+  const fetchScreen = async () => {
+    try {
+      const res = await api.get(`/screens/${id}`);
+      setScreen(res.data);
+      if (res.data.config?.browserSettings) {
+        setBrowserSettings(res.data.config.browserSettings);
+      }
+    } catch (error) {
+      console.error('Failed to fetch screen details:', error);
+      toast.error('Failed to load screen details');
+      navigate('/screens');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchScreen();
+    const interval = setInterval(fetchScreen, 30000); // Poll every 30s
+    return () => clearInterval(interval);
+  }, [id]);
+
+  const handleCommand = async (command: string, payload?: any) => {
+    if (!confirm(`Are you sure you want to send command: ${command}?`)) return;
+    
+    setCommandLoading(true);
+    try {
+      await api.post(`/screens/${id}/command`, { command, payload });
+      toast.success(`Command '${command}' sent successfully`);
+      fetchScreen();
+    } catch (error) {
+      console.error('Failed to send command:', error);
+      toast.error('Failed to send command');
+    } finally {
+      setCommandLoading(false);
+    }
+  };
+
+  const handleSnapshot = async () => {
+    try {
+      await api.post(`/screens/${id}/snapshot`);
+      toast.success('Snapshot requested');
+      // Ideally wait/poll for it, but for now just notify
+    } catch (error) {
+      toast.error('Failed to request snapshot');
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!confirm('Are you sure you want to clear ALL commands? This will remove pending, processing, and completed commands.')) return;
+    
+    setCommandLoading(true);
+    try {
+      await api.post(`/screens/${id}/commands/clear`);
+      toast.success('Command queue cleared');
+      fetchScreen();
+    } catch (error) {
+      console.error('Failed to clear queue:', error);
+      toast.error('Failed to clear queue');
+    } finally {
+      setCommandLoading(false);
+    }
+  };
+
+  const handleResetContent = async () => {
+    if (!confirm('Are you sure you want to DELETE ALL CONTENT from this screen? This will stop playback, clear the cache, and return the screen to the "Waiting for Content" state.')) return;
+    
+    setCommandLoading(true);
+    try {
+        await api.post(`/screens/${id}/reset`);
+        toast.success('Screen content reset successfully');
+        fetchScreen();
+    } catch (error: any) {
+        console.error('Reset failed:', error);
+        toast.error(error.message || 'Failed to reset screen');
+    } finally {
+        setCommandLoading(false);
+    }
+  };
+
+  const handlePublishPlaylist = async (playlistId: string) => {
+    if (!confirm('Are you sure you want to publish this playlist to the screen?')) return;
+    
+    try {
+      await api.post(`/screens/${id}/publish`, { playlistId });
+      toast.success('Playlist published successfully');
+      fetchScreen(); // Refresh to show new active playlist
+    } catch (error) {
+      console.error('Failed to publish playlist:', error);
+      toast.error('Failed to publish playlist');
+    }
+  };
+
+  const handleExportLogs = async () => {
+    try {
+      const response = await api.get(`/screens/${id}/logs/export`, {
+        responseType: 'blob',
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `screen-${id}-logs-${new Date().toISOString().split('T')[0]}.txt`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error('Failed to export logs:', error);
+      toast.error('Failed to export logs');
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSettingsLoading(true);
+    try {
+        const updatedConfig = {
+            ...screen.config,
+            browserSettings: browserSettings
+        };
+        await api.put(`/screens/${id}`, { config: updatedConfig });
+        toast.success('Settings saved successfully');
+        fetchScreen();
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        toast.error('Failed to save settings');
+    } finally {
+        setSettingsLoading(false);
+    }
+  };
+
+  if (loading) return <div className="p-8 text-center">Loading...</div>;
+  if (!screen) return <div className="p-8 text-center">Screen not found</div>;
+
+  const telemetry = screen.config?.telemetry || {};
+  const pendingCommands = screen.config?.pendingCommands || [];
+  const displayQueue = screen.config?.commandHistory || [];
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={() => navigate('/screens')}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <ArrowLeft size={24} className="text-gray-600" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 flex items-center">
+              <Monitor className="mr-2 text-blue-600" />
+              {screen.name || 'Unnamed Screen'}
+            </h1>
+            <p className="text-gray-500 text-sm flex items-center mt-1">
+              <span className={`w-2 h-2 rounded-full mr-2 ${screen.status === 'ONLINE' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+              {screen.status} • Last seen: {new Date(screen.lastSeenAt).toLocaleString()}
+            </p>
+          </div>
+        </div>
+        <div className="flex space-x-2">
+          <button 
+            onClick={fetchScreen}
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+            title="Refresh Data"
+          >
+            <RefreshCw size={20} />
+          </button>
+        </div>
+      </div>
+
+      {/* Quick Actions Bar */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-4 justify-end">
+        <button 
+          onClick={() => handleCommand('REBOOT')}
+          disabled={commandLoading}
+          className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+        >
+          <Power size={18} className="mr-2" /> Reboot Player
+        </button>
+        <button 
+          onClick={() => handleCommand('RELOAD')}
+          disabled={commandLoading}
+          className="flex items-center px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+        >
+          <RefreshCw size={18} className="mr-2" /> Reload Content
+        </button>
+        <button 
+          onClick={() => handleCommand('CLEAR_CACHE')}
+          disabled={commandLoading}
+          className="flex items-center px-4 py-2 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-100 transition-colors"
+        >
+          <Database size={18} className="mr-2" /> Clear Cache
+        </button>
+        <button 
+          onClick={handleResetContent}
+          disabled={commandLoading}
+          className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+        >
+          <Trash2 size={18} className="mr-2" /> Delete Content
+        </button>
+        <button 
+          onClick={handleSnapshot}
+          className="flex items-center px-4 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors"
+        >
+          <Camera size={18} className="mr-2" /> Take Snapshot
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8 overflow-x-auto">
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'playlists', label: 'Playlists' },
+            { id: 'configuration', label: 'Screen Configuration' },
+            { id: 'settings', label: 'Screen Settings' },
+            { id: 'downloads', label: 'Downloads' },
+            { id: 'snapshots', label: 'Snapshots' },
+            { id: 'logs', label: 'Logs' }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`
+                whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm capitalize
+                ${activeTab === tab.id 
+                  ? 'border-blue-500 text-blue-600' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
+              `}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Tab Content */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-h-[400px]">
+        {activeTab === 'overview' && (
+          <div className="p-6 space-y-8">
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+               <StatCard 
+                 icon={PlaySquare} 
+                 label="Live Playlist" 
+                 value={screen.activePlaylist?.name || 'No Playlist'} 
+                 subValue={screen.activePlaylist ? 'Playing Now' : 'Idle'}
+                 color="text-blue-600 bg-blue-50"
+               />
+               <StatCard 
+                 icon={Monitor} 
+                 label="Player Type" 
+                 value={screen.playerType || 'Browser'} 
+                 subValue="Platform"
+                 color="text-teal-600 bg-teal-50"
+               />
+               <StatCard 
+                 icon={Smartphone} 
+                 label="Operating System" 
+                 value={telemetry.os || 'Linux'} 
+                 subValue={telemetry.appVersion || 'Unknown Version'}
+                 color="text-purple-600 bg-purple-50"
+               />
+               <StatCard 
+                 icon={RotateCw} 
+                 label="Orientation" 
+                 value={screen.orientation || 'Landscape'} 
+                 subValue="0°"
+                 color="text-orange-600 bg-orange-50"
+               />
+               <StatCard 
+                 icon={Maximize} 
+                 label="Resolution" 
+                 value={telemetry.resolution || '1920x1080'} 
+                 subValue="16:9 Aspect Ratio"
+                 color="text-green-600 bg-green-50"
+               />
+               <StatCard 
+                 icon={HardDrive} 
+                 label="Storage" 
+                 value={telemetry.diskFree ? `${telemetry.diskFree} GB Free` : 'Unknown'} 
+                 subValue={telemetry.diskTotal ? `of ${telemetry.diskTotal} GB` : 'Free Space'}
+                 color="text-indigo-600 bg-indigo-50"
+               />
+               <StatCard 
+                 icon={Cpu} 
+                 label="CPU Usage" 
+                 value={telemetry.cpuUsage ? `${telemetry.cpuUsage}%` : 'N/A'} 
+                 subValue="Load"
+                 color="text-red-600 bg-red-50"
+               />
+               <StatCard 
+                 icon={Activity} 
+                 label="Memory" 
+                 value={telemetry.memoryUsage ? `${telemetry.memoryUsage}%` : 'N/A'} 
+                 subValue="Used"
+                 color="text-pink-600 bg-pink-50"
+               />
+               <StatCard 
+                 icon={Thermometer} 
+                 label="Temperature" 
+                 value={telemetry.temperature ? `${telemetry.temperature}°C` : 'N/A'} 
+                 subValue="Core Temp"
+                 color="text-yellow-600 bg-yellow-50"
+               />
+            </div>
+
+            {/* Command Queue & Download Progress */}
+            <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Terminal size={20} className="mr-2 text-gray-500" /> Command Queue
+                </div>
+                <button
+                  onClick={handleClearHistory}
+                  className="px-4 py-2 rounded-lg border text-gray-700 bg-white hover:bg-gray-50 text-sm font-medium"
+                >
+                  Clear Command Queue
+                </button>
+              </h3>
+              
+              {displayQueue.length === 0 ? (
+                <p className="text-gray-500 italic mb-4">No recent commands.</p>
+              ) : (
+                <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                  {displayQueue.map((cmd: any, idx: number) => (
+                    <div key={idx} className="bg-white p-3 rounded border border-gray-200 flex flex-col shadow-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-sm text-gray-800 font-bold">{cmd.type}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            cmd.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                            cmd.status === 'FAILED' ? 'bg-red-100 text-red-800' :
+                            cmd.status === 'PROCESSING' ? 'bg-blue-100 text-blue-800' :
+                            'bg-yellow-100 text-yellow-800'
+                        }`}>
+                            {cmd.status || 'PENDING'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-1">
+                        <span className="text-xs text-gray-500">{cmd.message || (cmd.status === 'PENDING' ? 'Waiting for player...' : '')}</span>
+                        <span className="text-xs text-gray-400">{new Date(cmd.createdAt).toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Download Progress Section */}
+              {telemetry.downloadProgress && telemetry.downloadProgress.status === 'DOWNLOADING' && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                    <Download size={16} className="mr-2 text-blue-500" /> 
+                    File Sync Progress
+                    {telemetry.downloadProgress.status && (
+                       <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                         telemetry.downloadProgress.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                         telemetry.downloadProgress.status === 'ERROR' ? 'bg-red-100 text-red-700' :
+                         'bg-blue-100 text-blue-700'
+                       }`}>
+                         {telemetry.downloadProgress.status}
+                       </span>
+                    )}
+                  </h4>
+                  
+                  {telemetry.downloadProgress.status === 'DOWNLOADING' && (
+                    <>
+                      <div className="bg-gray-200 rounded-full h-2.5 mb-2 overflow-hidden">
+                        <div 
+                          className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
+                          style={{ width: `${(telemetry.downloadProgress.completed / Math.max(telemetry.downloadProgress.total, 1)) * 100}%` }}
+                        ></div>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span className="truncate max-w-[200px]">
+                          {telemetry.downloadProgress.currentFile ? `Downloading: ${telemetry.downloadProgress.currentFile}` : 'Preparing...'}
+                        </span>
+                        <span>{telemetry.downloadProgress.completed} / {telemetry.downloadProgress.total}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'playlists' && (
+          <PlaylistSelector 
+            currentPlaylistId={screen.activePlaylist?.id}
+            onPublish={handlePublishPlaylist} 
+          />
+        )}
+
+        {activeTab === 'downloads' && (
+          <div className="p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <Download size={20} className="mr-2 text-gray-500" /> Cached Media Files
+            </h3>
+            
+            {telemetry.cachedFiles && telemetry.cachedFiles.length > 0 ? (
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File Name / ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cached At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {telemetry.cachedFiles.map((file: any) => (
+                      <tr key={file.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {file.filename && file.filename !== 'unknown' ? file.filename : <span className="font-mono text-gray-500">{file.id.substring(0, 8)}...</span>}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{file.mimeType}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(file.timestamp).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200 border-dashed">
+                <HardDrive size={32} className="mx-auto text-gray-400 mb-2" />
+                <p className="text-gray-500">No cached files reported by the player.</p>
+                <p className="text-xs text-gray-400 mt-1">Files will appear here once downloaded by the screen.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Configuration Placeholder (kept as coming soon) */}
+        {activeTab === 'configuration' && (
+          <div className="p-12 text-center text-gray-500">
+            <Settings size={48} className="mx-auto mb-4 text-gray-300" />
+            <h3 className="text-lg font-medium text-gray-900">Coming Soon</h3>
+            <p>The configuration module is currently under development.</p>
+          </div>
+        )}
+
+        {/* Screen Settings */}
+        {activeTab === 'settings' && (
+          <div className="p-6 space-y-8">
+             {screen.playerType === 'Browser' ? (
+                <div className="space-y-8">
+                    {/* Display & Appearance */}
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <Monitor className="mr-2" size={20} /> Display & Appearance
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Software Rotation</label>
+                                <select 
+                                    className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    value={browserSettings.rotation || 0}
+                                    onChange={(e) => setBrowserSettings({...browserSettings, rotation: parseInt(e.target.value)})}
+                                >
+                                    <option value={0}>0° (Landscape)</option>
+                                    <option value={90}>90° (Portrait)</option>
+                                    <option value={180}>180° (Inverted)</option>
+                                    <option value={270}>270° (Portrait Inverted)</option>
+                                </select>
+                                <p className="mt-1 text-xs text-gray-500">For screens that don't support native rotation.</p>
+                            </div>
+                            <div>
+                                 <label className="block text-sm font-medium text-gray-700 mb-1">Overscan / Zoom ({browserSettings.zoom || 100}%)</label>
+                                 <input 
+                                    type="range" 
+                                    min="80" 
+                                    max="120" 
+                                    value={browserSettings.zoom || 100}
+                                    onChange={(e) => setBrowserSettings({...browserSettings, zoom: parseInt(e.target.value)})}
+                                    className="w-full"
+                                 />
+                                 <p className="mt-1 text-xs text-gray-500">Adjust content scaling to fit TV bezels.</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Background Color</label>
+                                <div className="flex items-center space-x-2">
+                                    <input 
+                                        type="color"
+                                        value={browserSettings.backgroundColor || '#000000'}
+                                        onChange={(e) => setBrowserSettings({...browserSettings, backgroundColor: e.target.value})}
+                                        className="h-9 w-16 rounded border border-gray-300"
+                                    />
+                                    <span className="text-sm text-gray-500">{browserSettings.backgroundColor || '#000000'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Audio Control */}
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <PlaySquare className="mr-2" size={20} /> Audio Control
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                 <label className="block text-sm font-medium text-gray-700 mb-1">Master Volume ({browserSettings.volume ?? 100}%)</label>
+                                 <input 
+                                    type="range" 
+                                    min="0" 
+                                    max="100" 
+                                    value={browserSettings.volume ?? 100}
+                                    onChange={(e) => setBrowserSettings({...browserSettings, volume: parseInt(e.target.value)})}
+                                    className="w-full"
+                                 />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Power & Maintenance */}
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <Power className="mr-2" size={20} /> Power & Maintenance
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Sleep Schedule (Blackout)</label>
+                                <div className="flex items-center space-x-2">
+                                    <input 
+                                        type="time"
+                                        value={browserSettings.sleepStart || ''}
+                                        onChange={(e) => setBrowserSettings({...browserSettings, sleepStart: e.target.value})}
+                                        className="border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                    <span className="text-gray-500">to</span>
+                                    <input 
+                                        type="time"
+                                        value={browserSettings.sleepEnd || ''}
+                                        onChange={(e) => setBrowserSettings({...browserSettings, sleepEnd: e.target.value})}
+                                        className="border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+                                <p className="mt-1 text-xs text-gray-500">Renders black screen during these hours.</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Auto-Reload Policy</label>
+                                <select 
+                                    className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    value={browserSettings.reloadPolicy || 'DISABLED'}
+                                    onChange={(e) => setBrowserSettings({...browserSettings, reloadPolicy: e.target.value})}
+                                >
+                                    <option value="DISABLED">Disabled</option>
+                                    <option value="DAILY">Daily (at specific time)</option>
+                                    <option value="INTERVAL">Interval (every X hours)</option>
+                                </select>
+                                
+                                {browserSettings.reloadPolicy === 'DAILY' && (
+                                     <input 
+                                        type="time"
+                                        value={browserSettings.reloadTime || '03:00'}
+                                        onChange={(e) => setBrowserSettings({...browserSettings, reloadTime: e.target.value})}
+                                        className="mt-2 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                )}
+                                {browserSettings.reloadPolicy === 'INTERVAL' && (
+                                     <div className="mt-2 flex items-center space-x-2">
+                                        <input 
+                                            type="number"
+                                            min="1"
+                                            max="24"
+                                            value={browserSettings.reloadInterval || 4}
+                                            onChange={(e) => setBrowserSettings({...browserSettings, reloadInterval: parseInt(e.target.value)})}
+                                            className="w-20 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                        />
+                                        <span className="text-sm text-gray-500">hours</span>
+                                     </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Connectivity & Diagnostics */}
+                     <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <Activity className="mr-2" size={20} /> Connectivity & Diagnostics
+                        </h3>
+                        <div className="flex items-center space-x-4">
+                             <div className="flex items-center">
+                                <input
+                                    id="debug-mode"
+                                    type="checkbox"
+                                    checked={browserSettings.debugMode || false}
+                                    onChange={(e) => setBrowserSettings({...browserSettings, debugMode: e.target.checked})}
+                                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                />
+                                <label htmlFor="debug-mode" className="ml-2 block text-sm text-gray-900">
+                                    Enable Debug Mode (Verbose Logging)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end pt-4">
+                        <button
+                            onClick={handleSaveSettings}
+                            disabled={settingsLoading}
+                            className="flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <Save className="mr-2" size={16} />
+                            {settingsLoading ? 'Saving...' : 'Save Configuration'}
+                        </button>
+                    </div>
+                </div>
+             ) : (
+                <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200 border-dashed">
+                    <Settings size={32} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-gray-500">Remote settings are currently only available for Browser players.</p>
+                </div>
+             )}
+          </div>
+        )}
+
+        {activeTab === 'logs' && (
+          <div className="p-6">
+             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center justify-between">
+                <div className="flex items-center">
+                  <FileText size={20} className="mr-2 text-gray-500" /> Recent Logs
+                </div>
+                <button
+                  onClick={handleExportLogs}
+                  className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 transition-colors text-sm font-medium"
+                >
+                  <Download size={16} className="mr-2" />
+                  Export to TXT
+                </button>
+              </h3>
+            <div className="bg-gray-900 text-gray-200 p-4 rounded-lg font-mono text-sm h-96 overflow-y-auto">
+              {screen.logs && screen.logs.length > 0 ? (
+                screen.logs.map((log: any) => (
+                  <div key={log.id} className="mb-1 border-b border-gray-800 pb-1">
+                    <span className="text-gray-500">[{new Date(log.createdAt).toLocaleTimeString()}]</span>{' '}
+                    <span className={log.level === 'ERROR' ? 'text-red-400' : 'text-green-400'}>{log.level}</span>:{' '}
+                    {log.message}
+                  </div>
+                ))
+              ) : (
+                <div className="text-gray-500 italic">No logs available.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'snapshots' && (
+          <div className="p-6">
+             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                <Camera size={20} className="mr-2 text-gray-500" /> Recent Snapshots
+              </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {screen.snapshots && screen.snapshots.length > 0 ? (
+                screen.snapshots.map((snap: any) => (
+                  <div key={snap.id} className="group relative rounded-lg overflow-hidden border border-gray-200">
+                    <img src={snap.imageUrl} alt="Snapshot" className="w-full h-auto object-cover" />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-2">
+                      {new Date(snap.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-4 text-center text-gray-500 py-12">No snapshots available.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Helper Component for Stats
+interface StatCardProps {
+  icon: any;
+  label: string;
+  value: string;
+  subValue: string;
+  color: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, value, subValue, color }) => (
+  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-start space-x-4 hover:shadow-md transition-shadow">
+    <div className={`p-3 rounded-lg ${color} bg-opacity-10`}>
+      <Icon size={24} />
+    </div>
+    <div>
+      <p className="text-sm text-gray-500 font-medium">{label}</p>
+      <p className="text-lg font-bold text-gray-800 mt-1">{value}</p>
+      {subValue && <p className="text-xs text-gray-400 mt-1">{subValue}</p>}
+    </div>
+  </div>
+);
+
+interface PlaylistSelectorProps {
+  currentPlaylistId?: string;
+  onPublish: (id: string) => void;
+}
+
+const PlaylistSelector: React.FC<PlaylistSelectorProps> = ({ currentPlaylistId, onPublish }) => {
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    fetchPlaylists();
+  }, []);
+
+  const fetchPlaylists = async () => {
+    try {
+      setLoading(true);
+      const data = await getPlaylists();
+      setPlaylists(data);
+    } catch (error) {
+      console.error('Failed to fetch playlists:', error);
+      toast.error('Failed to load playlists');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredPlaylists = playlists
+    .filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      // Sort active playlist to top
+      if (a.id === currentPlaylistId) return -1;
+      if (b.id === currentPlaylistId) return 1;
+      // Then by date desc
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+        <div>
+           <h3 className="text-lg font-semibold text-gray-800">Select Playlist to Publish</h3>
+           <p className="text-sm text-gray-500">Choose a playlist to instantly display on this screen</p>
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <input
+            type="text"
+            placeholder="Search playlists..."
+            className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-2 text-gray-500">Loading playlists...</p>
+        </div>
+      ) : filteredPlaylists.length === 0 ? (
+        <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+          <PlaySquare className="mx-auto h-12 w-12 text-gray-300 mb-2" />
+          <p className="text-gray-500">No playlists found.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredPlaylists.map((playlist) => {
+            const isCurrent = playlist.id === currentPlaylistId;
+            return (
+              <div 
+                key={playlist.id} 
+                className={`group bg-white rounded-lg border shadow-sm hover:shadow-md transition-all relative ${
+                  isCurrent ? 'ring-2 ring-green-500 border-green-500 bg-green-50' : 'border-gray-200'
+                }`}
+              >
+                {/* Thumbnail Area */}
+                <div className="aspect-video bg-gray-100 rounded-t-lg relative overflow-hidden flex items-center justify-center">
+                  <PlaylistThumbnail playlist={playlist} className="w-full h-full pointer-events-none" />
+                  
+                  {/* Hover Overlay Actions */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[1px] z-20">
+                    <button 
+                      onClick={() => onPublish(playlist.id)}
+                      disabled={isCurrent}
+                      className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm ${
+                        isCurrent 
+                          ? 'bg-green-100 text-green-700 cursor-not-allowed opacity-90'
+                          : 'bg-white text-blue-600 hover:bg-blue-50'
+                      }`}
+                    >
+                      {isCurrent ? (
+                        <>
+                          <CheckCircle size={18} />
+                          Active
+                        </>
+                      ) : (
+                        <>
+                          <Share size={18} />
+                          Publish
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Active Badge (Always visible if active) */}
+                  {isCurrent && (
+                    <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded shadow-sm flex items-center gap-1 z-10">
+                      <CheckCircle size={12} />
+                      ACTIVE
+                    </div>
+                  )}
+                </div>
+
+                {/* Info Area */}
+                <div className="p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-gray-900 truncate pr-2" title={playlist.name}>
+                      {playlist.name}
+                    </h3>
+                    {playlist.description && (
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                        Desc
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-4 text-xs text-gray-500 mt-3">
+                    <div className="flex items-center gap-1" title="Screens Published">
+                      <Monitor size={14} />
+                      <span>{playlist.screenCount || 0} screens</span>
+                    </div>
+                    <div className="flex items-center gap-1" title="Created Date">
+                      <Calendar size={14} />
+                      <span>{new Date(playlist.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ScreenDetails;

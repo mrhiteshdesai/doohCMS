@@ -1,0 +1,54 @@
+@import 'leaflet/dist/leaflet.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+}
+
+@layer base {
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  input[type='text'],
+  input[type='password'],
+  input[type='email'],
+  input[type='number'],
+  input[type='url'],
+  textarea,
+  select {
+    @apply block w-full rounded-md border border-gray-300 shadow-sm sm:text-sm bg-white text-gray-900;
+    padding: 0.5rem 0.75rem;
+    transition: all 0.2s ease-in-out;
+  }
+
+  input[type='text']:focus,
+  input[type='password']:focus,
+  input[type='email']:focus,
+  input[type='number']:focus,
+  input[type='url']:focus,
+  textarea:focus,
+  select:focus {
+    @apply ring-2 ring-blue-500 ring-opacity-50 border-blue-500 outline-none;
+  }
+
+  /* Fix for disabled inputs */
+  input:disabled, textarea:disabled, select:disabled {
+    @apply bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200;
+  }
+}

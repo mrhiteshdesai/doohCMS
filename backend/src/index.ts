@@ -1,0 +1,41 @@
+import dotenv from 'dotenv';
+import app from './app';
+import prisma from './prisma';
+
+import { startCleanupJob } from './jobs/logCleanup';
+import { startStatusCheckJob } from './jobs/screenStatus';
+
+dotenv.config();
+
+const PORT = process.env.PORT || 3000;
+
+async function main() {
+  try {
+    // Check DB connection (optional, prisma connects lazily usually)
+    // await prisma.$connect();
+    // console.log('Connected to Database');
+
+    // Start background jobs
+    startCleanupJob();
+    startStatusCheckJob();
+
+    const server = app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGTERM', async () => {
+      console.log('SIGTERM signal received: closing HTTP server');
+      server.close(() => {
+        console.log('HTTP server closed');
+      });
+      await prisma.$disconnect();
+    });
+
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+main();

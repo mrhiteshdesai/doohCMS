@@ -1,0 +1,34 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.DS_Store
+.vscode/
+.idea/
+*.log
+*.sqlite
+*.db
+
+# Backend specific
+backend/node_modules/
+backend/dist/
+backend/uploads/
+!backend/uploads/.gitkeep
+backend/logs/
+
+# Frontend specific
+frontend/node_modules/
+frontend/dist/
+frontend/dist_electron/
+frontend/dist_out/
+frontend/dist_out_portable/
+frontend/installer_out/
+frontend/release/
+frontend/coverage/
+
+# Backups and temp
+_backup/
+*_backup/
+*.tmp
+*.bak

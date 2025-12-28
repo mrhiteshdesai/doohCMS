@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id           String        @id @default(uuid())
+  name         String
+  config       Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+  layouts      Layout[]
+  mediaFiles   MediaFile[]
+  mediaFolders MediaFolder[]
+  playlists    Playlist[]
+  proofOfPlays ProofOfPlay[]
+  roles        Role[]
+  schedules    Schedule[]
+  screens      Screen[]
+  screenGroups ScreenGroup[]
+  users        User[]
+  widgets      Widget[]
+}
+
+model Layout {
+  id           String       @id @default(uuid())
+  name         String
+  description  String?
+  resolution   String       @default("1920x1080")
+  canvasWidth  Int          @default(1920)
+  canvasHeight Int          @default(1080)
+  orientation  String       @default("LANDSCAPE")
+  tenantId     String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  zones        LayoutZone[]
+}
+
+model LayoutZone {
+  id        String   @id @default(uuid())
+  layoutId  String
+  name      String
+  x         Int
+  y         Int
+  width     Int
+  height    Int
+  zIndex    Int      @default(1)
+  rotation  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  layout    Layout   @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+}
+
+model Widget {
+  id            String             @id @default(uuid())
+  name          String
+  type          String
+  config        String
+  tenantId      String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  playlistItems PlaylistZoneItem[]
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+}
+
+model User {
+  id          String     @id @default(uuid())
+  email       String     @unique
+  password    String
+  name        String?
+  tenantId    String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  permissions String?
+  isActive    Boolean    @default(true)
+  auditLogs   AuditLog[]
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
+  userRoles   UserRole[]
+}
+
+model Playlist {
+  id              String         @id @default(uuid())
+  name            String
+  description     String?
+  resolution      String         @default("1920x1080")
+  canvasWidth     Int            @default(1920)
+  canvasHeight    Int            @default(1080)
+  orientation     String         @default("LANDSCAPE")
+  tenantId        String
+  thumbnailUrl    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  tenant          Tenant         @relation(fields: [tenantId], references: [id])
+  zones           PlaylistZone[]
+  proofOfPlays    ProofOfPlay[]
+  schedules       Schedule[]
+  activeOnScreens Screen[]       @relation("ScreenActivePlaylist")
+  activeOnGroups  ScreenGroup[]  @relation("GroupActivePlaylist")
+}
+
+model PlaylistZone {
+  id         String             @id @default(uuid())
+  playlistId String
+  name       String
+  x          Int
+  y          Int
+  width      Int
+  height     Int
+  zIndex     Int                @default(1)
+  rotation   Int                @default(0)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  playlist   Playlist           @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  items      PlaylistZoneItem[]
+}
+
+model PlaylistZoneItem {
+  id        String       @id @default(uuid())
+  zoneId    String
+  mediaId   String?
+  widgetId  String?
+  type      String       @default("MEDIA")
+  order     Int
+  duration  Int          @default(10)
+  createdAt DateTime     @default(now())
+  widget    Widget?      @relation(fields: [widgetId], references: [id])
+  media     MediaFile?   @relation(fields: [mediaId], references: [id])
+  zone      PlaylistZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+}
+
+model ScreenGroup {
+  id               String              @id @default(uuid())
+  name             String
+  description      String?
+  tags             String?
+  tenantId         String
+  activePlaylistId String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  schedules        Schedule[]
+  activePlaylist   Playlist?           @relation("GroupActivePlaylist", fields: [activePlaylistId], references: [id])
+  tenant           Tenant              @relation(fields: [tenantId], references: [id])
+  members          ScreenGroupMember[]
+}
+
+model ScreenGroupMember {
+  id       String      @id @default(uuid())
+  groupId  String
+  screenId String
+  addedAt  DateTime    @default(now())
+  screen   Screen      @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  group    ScreenGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, screenId])
+}
+
+model Role {
+  id          String     @id @default(uuid())
+  name        String
+  permissions String
+  tenantId    String?
+  tenant      Tenant?    @relation(fields: [tenantId], references: [id])
+  userRoles   UserRole[]
+}
+
+model UserRole {
+  id     String @id @default(uuid())
+  userId String
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([userId, roleId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  details   String?
+  userId    String?
+  tenantId  String
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String
+  tenantId  String
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model Screen {
+  id               String              @id @default(uuid())
+  name             String?
+  orientation      String              @default("LANDSCAPE")
+  status           String              @default("UNPAIRED")
+  lastSeenAt       DateTime?
+  tags             String?
+  location         String?
+  latitude         Float?
+  longitude        Float?
+  playerType       String?             // Browser, Android, WebOS, Tizen
+  pairingCodeId    String?             @unique
+  tenantId         String?
+  config           Json?
+  activePlaylistId String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  proofOfPlays     ProofOfPlay[]
+  schedules        Schedule[]
+  activePlaylist   Playlist?           @relation("ScreenActivePlaylist", fields: [activePlaylistId], references: [id])
+  tenant           Tenant?             @relation(fields: [tenantId], references: [id])
+  pairingCode      ScreenPairingCode?  @relation(fields: [pairingCodeId], references: [id])
+  groupMemberships ScreenGroupMember[]
+  heartbeats       ScreenHeartbeat[]
+  logs             ScreenLog[]
+  snapshots        ScreenSnapshot[]
+}
+
+model ScreenPairingCode {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  screenId  String?  @unique
+  createdAt DateTime @default(now())
+  screen    Screen?
+}
+
+model ScreenHeartbeat {
+  id        String   @id @default(uuid())
+  screenId  String
+  timestamp DateTime @default(now())
+  metadata  Json?
+  screen    Screen   @relation(fields: [screenId], references: [id])
+}
+
+model ScreenLog {
+  id        String   @id @default(uuid())
+  screenId  String
+  level     String
+  message   String
+  createdAt DateTime @default(now())
+  screen    Screen   @relation(fields: [screenId], references: [id])
+}
+
+model ScreenSnapshot {
+  id        String   @id @default(uuid())
+  screenId  String
+  imageUrl  String
+  createdAt DateTime @default(now())
+  screen    Screen   @relation(fields: [screenId], references: [id])
+}
+
+model MediaFolder {
+  id        String        @id @default(uuid())
+  name      String
+  parentId  String?
+  tenantId  String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  files     MediaFile[]
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  parent    MediaFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children  MediaFolder[] @relation("FolderHierarchy")
+}
+
+model MediaFile {
+  id            String             @id @default(uuid())
+  name          String
+  url           String
+  mimeType      String
+  size          Int
+  folderId      String?
+  tenantId      String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  duration      Float?
+  height        Int?
+  width         Int?
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  folder        MediaFolder?       @relation(fields: [folderId], references: [id])
+  playlistItems PlaylistZoneItem[]
+  proofOfPlays  ProofOfPlay[]
+}
+
+model ProofOfPlay {
+  id         String    @id @default(uuid())
+  screenId   String
+  mediaId    String
+  playlistId String?
+  startedAt  DateTime
+  duration   Float
+  tenantId   String
+  createdAt  DateTime  @default(now())
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  playlist   Playlist? @relation(fields: [playlistId], references: [id])
+  media      MediaFile @relation(fields: [mediaId], references: [id])
+  screen     Screen    @relation(fields: [screenId], references: [id])
+}
+
+model Schedule {
+  id          String             @id @default(uuid())
+  name        String
+  description String?
+  priority    Int                @default(0)
+  tenantId    String
+  playlistId  String
+  screenId    String?
+  groupId     String?
+  startDate   DateTime
+  endDate     DateTime?
+  startTime   String
+  endTime     String?
+  recurrence  ScheduleRecurrence @default(NONE)
+  daysOfWeek  String?
+  timezone    String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  group       ScreenGroup?       @relation(fields: [groupId], references: [id])
+  screen      Screen?            @relation(fields: [screenId], references: [id])
+  playlist    Playlist           @relation(fields: [playlistId], references: [id])
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, playlistId])
+}
+
+enum ScheduleRecurrence {
+  NONE
+  ONE_TIME
+  DAILY
+  WEEKDAY
+  WEEKEND
+  SPECIFIC_DAYS
+}
