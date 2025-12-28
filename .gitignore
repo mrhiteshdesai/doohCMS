@@ -32,3 +32,7 @@ _backup/
 *_backup/
 *.tmp
 *.bak
+frontend/final_installer/
+frontend/final_installer2/
+*.exe
+~$*
