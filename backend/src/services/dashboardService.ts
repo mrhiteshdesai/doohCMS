@@ -73,7 +73,7 @@ export const getDashboardStats = async (tenantId: string) => {
     });
 
     const topMedia = topMediaRaw.map(item => {
-      const media = mediaDetails.find(m => m.id === item.mediaId);
+      const media = mediaDetails.find((m: any) => m.id === item.mediaId);
       return {
         name: media?.name || 'Unknown',
         plays: item._count._all
@@ -92,7 +92,7 @@ export const getDashboardStats = async (tenantId: string) => {
         storageUsed: storageStats._sum.size || 0
       },
       activity: recentActivity,
-      mediaDistribution: mediaTypes.map(m => ({
+      mediaDistribution: mediaTypes.map((m: any) => ({
         type: m.mimeType,
         count: m._count._all
       })),

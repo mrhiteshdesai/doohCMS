@@ -1,4 +1,4 @@
-import { ScheduleRecurrence } from '@prisma/client';
+import { Prisma, ScheduleRecurrence } from '@prisma/client';
 import prisma from '../prisma';
 
 // use shared prisma client

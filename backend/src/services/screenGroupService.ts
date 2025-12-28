@@ -98,7 +98,7 @@ export const assignScreens = async (tenantId: string, groupId: string, screenIds
   if (!group) throw new Error('Group not found');
 
   // Use transaction to replace members
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     // 1. Remove all existing members
     await tx.screenGroupMember.deleteMany({
       where: { groupId }
@@ -140,7 +140,7 @@ export const publishPlaylist = async (tenantId: string, groupId: string, playlis
     if (!playlist) throw new Error('Playlist not found');
   }
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     // Update group's active playlist
     await tx.screenGroup.update({
       where: { id: groupId },
@@ -154,7 +154,7 @@ export const publishPlaylist = async (tenantId: string, groupId: string, playlis
       select: { screenId: true }
     });
 
-    const screenIds = members.map(m => m.screenId);
+    const screenIds = members.map((m: any) => m.screenId);
 
     if (screenIds.length > 0) {
       await tx.screen.updateMany({

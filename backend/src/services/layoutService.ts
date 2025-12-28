@@ -93,7 +93,7 @@ export const updateLayout = async (
     const layout = await prisma.layout.findFirst({ where: { id, tenantId } });
     if (!layout) throw new Error("Layout not found");
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       // Delete old
       await tx.layoutZone.deleteMany({
         where: { layoutId: id }

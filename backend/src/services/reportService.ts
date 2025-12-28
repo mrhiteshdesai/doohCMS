@@ -27,7 +27,7 @@ export const generateUptimeReport = async (tenantId: string, startDate?: string,
       select: { id: true, name: true, status: true, lastSeenAt: true, createdAt: true }
     });
 
-    const report = await Promise.all(screens.map(async (screen) => {
+    const report = await Promise.all(screens.map(async (screen: any) => {
       // Determine effective start date (cannot report uptime before screen existed)
       const effectiveStart = screen.createdAt > start ? screen.createdAt : start;
       
@@ -106,7 +106,7 @@ export const generateUptimeReport = async (tenantId: string, startDate?: string,
       }
 
       // 2. Process Logs
-      logs.forEach(log => {
+      logs.forEach((log: any) => {
         if (log.message.includes('Screen went OFFLINE')) {
           if (!offlineStart) {
             offlineStart = log.createdAt;

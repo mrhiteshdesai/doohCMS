@@ -225,7 +225,7 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
                 where: { id: { in: mediaIds } },
                 select: { id: true, name: true }
             });
-            mediaMap = new Map(mediaFiles.map(m => [m.id, m.name]));
+            mediaMap = new Map(mediaFiles.map((m: any) => [m.id, m.name]));
           } catch (e) {
               console.error('Failed to resolve media names for logs', e);
           }
@@ -427,7 +427,7 @@ export const deleteScreen = async (screenId: string, tenantId: string) => {
   }
 
   // Transaction to clean up pairing code association and related data
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     // 1. Unlink Pairing Code if exists
     if (screen.pairingCodeId) {
       await tx.screenPairingCode.update({

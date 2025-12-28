@@ -1,4 +1,4 @@
-import { Playlist } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import prisma from '../prisma';
 
 export const createPlaylist = async (
@@ -28,7 +28,7 @@ export const createPlaylist = async (
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     const playlist = await tx.playlist.create({
       data: {
         name,
@@ -191,7 +191,7 @@ export const updatePlaylist = async (
     const playlist = await prisma.playlist.findFirst({ where: { id, tenantId } });
     if (!playlist) throw new Error("Playlist not found");
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       // Delete old
       await tx.playlistZone.deleteMany({
         where: { playlistId: id }

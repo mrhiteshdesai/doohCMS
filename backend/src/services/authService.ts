@@ -6,7 +6,7 @@ export const registerTenant = async (data: any) => {
   const { tenantName, email, password, userName } = data;
 
   // Transaction to ensure atomicity
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: any) => {
     // 1. Create Tenant
     const tenant = await tx.tenant.create({
       data: { name: tenantName },
@@ -67,7 +67,7 @@ export const login = async (data: any) => {
   }
 
   // Aggregate permissions
-  const rolePermissions = user.userRoles.map(ur => ur.role.permissions).join(',').split(',');
+  const rolePermissions = user.userRoles.map((ur: any) => ur.role.permissions).join(',').split(',');
   const userPermissions = (user.permissions || '').split(',');
   const allPermissions = Array.from(new Set([...rolePermissions, ...userPermissions]))
     .map(p => p.trim())
@@ -77,7 +77,7 @@ export const login = async (data: any) => {
     id: user.id,
     email: user.email,
     tenantId: user.tenantId,
-    roles: user.userRoles.map((ur) => ur.role.name),
+    roles: user.userRoles.map((ur: any) => ur.role.name),
     permissions: allPermissions
   });
 
@@ -93,7 +93,7 @@ export const login = async (data: any) => {
       email: user.email, 
       name: user.name, 
       permissions: allPermissions, // Return aggregated permissions
-      roles: user.userRoles.map(ur => ur.role)
+      roles: user.userRoles.map((ur: any) => ur.role)
     } 
   };
 };
