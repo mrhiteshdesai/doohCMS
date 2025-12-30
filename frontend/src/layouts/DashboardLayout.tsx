@@ -80,12 +80,12 @@ const DashboardLayout = () => {
       icon: <Clapperboard size={20} />,
       children: [
         { name: 'Playlists', path: '/playlists', icon: <PlaySquare size={20} />, module: 'playlist' },
+        { name: 'Media Library', path: '/media', icon: <Image size={20} />, module: 'library' },
         { name: 'Layouts', path: '/layouts', icon: <LayoutTemplate size={20} />, module: 'layouts' },
       ]
     },
     { name: 'Schedules', path: '/schedules', icon: <Calendar size={20} />, module: 'schedules' },
     { name: 'Widgets', path: '/widgets', icon: <AppWindow size={20} />, module: 'widgets' },
-    { name: 'Media Library', path: '/media', icon: <Image size={20} />, module: 'library' },
     { name: 'Team Management', path: '/team', icon: <Users size={20} />, module: 'team_management' },
     { 
       name: 'Reports', 
