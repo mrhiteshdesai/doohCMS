@@ -71,7 +71,16 @@ app.use('/api/tenant', tenantRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Static files serving with robust path resolution
+const uploadDir = path.join(process.cwd(), 'uploads');
+console.log('Serving static files from:', uploadDir);
+
+app.use('/uploads', (req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+}, express.static(uploadDir));
 
 // Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
