@@ -153,29 +153,18 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           console.log(`[Player] Retrying in ${backoffDelay}ms...`);
           setTimeout(() => {
               setRetryCount(prev => prev + 1);
-              // Force re-render of media element by appending a timestamp or just relying on state update?
-              // The simplest way to retry a source load is often just re-rendering the component or updating src.
-              // Here, we just increment retryCount, which doesn't directly change src.
-              // Ideally, we should invalidate the URL or force reload.
-              // For now, simply triggering a re-render might not be enough if the browser cached the failure.
-              // Let's force next item for now as a fallback if retries fail?
-              // Or better:
           }, backoffDelay);
       } else {
           console.warn('[Player] Max retries reached, skipping item.');
-          // Log error to backend?
-           if (currentItem?.media?.id) {
-               // We don't have direct access to socket here easily without context, but we can try axios
-               // axios.post('/api/player/log', { ... })
-           }
           setRetryCount(0);
           nextItem();
       }
   };
+  
   // Reset retry count on item change
   useEffect(() => {
       setRetryCount(0);
-  }, [currentItem]);
+  }, [currentItem?.id]);
 
 
   if (!currentItem) {
@@ -192,22 +181,20 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
 
   const type = getMediaType(currentItem.media.mimeType);
   // Prefer cached URL, fallback to server URL (only if online, but we should force cache usage if possible)
-  // Actually fallback is good for immediate testing if cache fails
   const src = mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
+
+  // Key includes retryCount to force re-mount on retry
+  const mediaKey = `${currentItem.id}-${retryCount}`;
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black">
       {type === 'IMAGE' ? (
         <img 
-          key={currentItem.id}
+          key={mediaKey}
           src={src} 
           className="w-full h-full object-fill"
           alt="Content"
-          onError={(e) => {
-            console.error('Image load failed', src);
-            // Force next immediately to avoid stuck screen
-            setTimeout(nextItem, 100); 
-          }}
+          onError={handleMediaError}
         />
       ) : (
         <>
@@ -216,7 +203,7 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
             video::-webkit-media-controls-enclosure { display: none !important; }
         `}</style>
         <video 
-          key={currentItem.id}
+          key={mediaKey}
           ref={videoRef}
           src={src} 
           className="w-full h-full object-fill pointer-events-none"
@@ -228,16 +215,15 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           controls={false}
           crossOrigin="anonymous"
           controlsList="nodownload nofullscreen noremoteplayback"
+          preload="auto"
           onEnded={() => {
-            if (videoRef.current) {
-                logPoP(Date.now() - (videoRef.current.duration * 1000), videoRef.current.duration);
+            const duration = videoRef.current?.duration;
+            if (duration && isFinite(duration)) {
+                logPoP(Date.now() - (duration * 1000), duration);
             }
             nextItem();
           }}
-          onError={(e) => {
-            console.error('Video error, skipping', e);
-            nextItem();
-          }}
+          onError={handleMediaError}
         />
         {/* Transparent Overlay to block all browser interactions and extensions */}
         <div 
