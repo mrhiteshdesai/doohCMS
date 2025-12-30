@@ -27,7 +27,8 @@ export const getSystemBranding = async () => {
   return {
     logoUrl: config.logoUrl,
     faviconUrl: config.faviconUrl,
-    primaryColor: config.primaryColor
+    primaryColor: config.primaryColor,
+    loginPage: config.loginPage || {}
   };
 };
 

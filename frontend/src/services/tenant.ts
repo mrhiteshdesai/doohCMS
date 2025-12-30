@@ -10,6 +10,14 @@ export interface TenantSettings {
     playerBranding?: boolean;
     supportContact?: string;
     
+    // Login Page Branding
+    loginPage?: {
+        imageUrl?: string;
+        welcomeTitle?: string;
+        welcomeText?: string;
+        showBrandLogo?: boolean;
+    };
+    
     // Player Customization
     player?: {
       backgroundColor?: string;
