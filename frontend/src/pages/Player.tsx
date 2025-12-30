@@ -635,7 +635,7 @@ const Player = () => {
         
         // Capture video frames manually before html2canvas
         const videoElements = document.querySelectorAll('video');
-        const videoCaptures: { canvas: HTMLCanvasElement, style: string, className: string }[] = [];
+        const videoCaptures: ({ canvas: HTMLCanvasElement, style: string, className: string } | null)[] = [];
         
         videoElements.forEach((video) => {
             try {
@@ -650,32 +650,40 @@ const Player = () => {
                         style: video.getAttribute('style') || '',
                         className: video.className
                     });
+                } else {
+                    videoCaptures.push(null);
                 }
             } catch (e) {
                 console.error('Failed to capture video frame', e);
+                videoCaptures.push(null);
             }
         });
 
         const element = document.getElementById('player-container') || document.body;
+        
+        // Ensure scroll to top
+        window.scrollTo(0, 0);
+
         const canvas = await html2canvas(element, {
             useCORS: true,
             allowTaint: false,
             logging: false,
-            scale: 0.5,
-            width: window.innerWidth,
-            height: window.innerHeight,
-            windowWidth: window.innerWidth,
-            windowHeight: window.innerHeight,
+            scale: 0.75, // Increased quality
+            width: element.scrollWidth, // Use scrollWidth to capture full content even if overflowing
+            height: element.scrollHeight,
+            windowWidth: element.scrollWidth,
+            windowHeight: element.scrollHeight,
             x: 0,
             y: 0,
             scrollX: 0,
             scrollY: 0,
             backgroundColor: '#000000', // Ensure black background instead of white
             onclone: (clonedDoc: Document) => {
+                // 1. Video Replacement Logic
                 const clonedVideos = clonedDoc.querySelectorAll('video');
                 clonedVideos.forEach((video: any, i: number) => {
-                    if (videoCaptures[i]) {
-                        const capture = videoCaptures[i];
+                    const capture = videoCaptures[i];
+                    if (capture) {
                         // Replace video with the captured canvas
                         const canvas = capture.canvas;
                         
@@ -699,6 +707,52 @@ const Player = () => {
                         }
                     }
                 });
+
+                // 2. Add Overlay with Details
+                const overlay = clonedDoc.createElement('div');
+                overlay.style.position = 'absolute';
+                overlay.style.bottom = '20px';
+                overlay.style.right = '20px';
+                overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
+                overlay.style.color = 'white';
+                overlay.style.padding = '16px';
+                overlay.style.borderRadius = '12px';
+                overlay.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+                overlay.style.zIndex = '999999';
+                overlay.style.display = 'flex';
+                overlay.style.flexDirection = 'column';
+                overlay.style.gap = '6px';
+                overlay.style.backdropFilter = 'blur(4px)';
+                overlay.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
+                overlay.style.minWidth = '200px';
+
+                // Data Preparation
+                const screenName = screenData?.name || 'Unknown Screen';
+                const screenId = pairingCode || 'N/A';
+                // Try to find location in screenData if exists, otherwise placeholder or remove
+                const location = screenData?.location ? 
+                    (typeof screenData.location === 'string' ? screenData.location : 
+                    (screenData.location.city ? `${screenData.location.city}, ${screenData.location.country || ''}` : 'Unknown Location')) 
+                    : 'Unknown Location';
+                const timestamp = new Date().toLocaleString();
+
+                overlay.innerHTML = `
+                    <div style="font-weight: 700; font-size: 18px; margin-bottom: 2px;">${screenName}</div>
+                    <div style="font-size: 14px; opacity: 0.9;">ID: <span style="font-family: monospace;">${screenId}</span></div>
+                    <div style="font-size: 14px; opacity: 0.9;">📍 ${location}</div>
+                    <div style="font-size: 12px; opacity: 0.7; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 8px;">
+                        ${timestamp}
+                    </div>
+                `;
+
+                // Append to container or body
+                const clonedContainer = clonedDoc.getElementById('player-container');
+                if (clonedContainer) {
+                    clonedContainer.style.position = 'relative'; // Ensure positioning context
+                    clonedContainer.appendChild(overlay);
+                } else {
+                    clonedDoc.body.appendChild(overlay);
+                }
             }
         } as any);
         
@@ -746,8 +800,7 @@ const Player = () => {
                 try {
                     const count = await playerCache.getFileCount();
                     telemetry.cachedFilesCount = count;
-                    // fetching all files loads blobs into memory and crashes background tabs
-                    // telemetry.cachedFiles = await playerCache.getAllFiles(); 
+                    telemetry.cachedFiles = await playerCache.getAllFiles(); 
                 } catch (err) {
                     console.warn('Failed to get cached files count', err);
                 }
@@ -952,7 +1005,7 @@ const Player = () => {
 
   if (status === 'LOADING') {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-white">
+      <div id="player-container" className="flex items-center justify-center h-screen bg-black text-white">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     );
@@ -960,7 +1013,7 @@ const Player = () => {
 
   if (status === 'ERROR') {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-black text-white">
+      <div id="player-container" className="flex flex-col items-center justify-center h-screen bg-black text-white">
         <div className="text-red-500 mb-4 text-xl">{error}</div>
         <button 
           onClick={() => window.location.reload()} 
@@ -975,7 +1028,7 @@ const Player = () => {
   if (status === 'PAIRED') {
     if (!currentPlaylist) {
         return (
-            <div className="flex h-screen w-screen bg-white overflow-hidden">
+            <div id="player-container" className="flex h-screen w-screen bg-white overflow-hidden">
                 {/* Left Side - Info & Status */}
                 <div 
                     className="w-1/2 h-full flex flex-col justify-center items-center p-12 relative shadow-2xl z-10"
@@ -1088,6 +1141,7 @@ const Player = () => {
 
     return (
         <div 
+            id="player-container"
             className="relative w-full h-full bg-black overflow-hidden"
             style={{ 
                 width: '100vw', 
@@ -1130,7 +1184,7 @@ const Player = () => {
 
   // Unpaired Screen Layout
   return (
-    <div className="flex h-screen w-screen bg-white overflow-hidden">
+    <div id="player-container" className="flex h-screen w-screen bg-white overflow-hidden">
       {/* Left Side - Info & Pairing */}
       <div 
         className="w-1/2 h-full flex flex-col justify-center items-center p-12 relative shadow-2xl z-10"

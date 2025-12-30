@@ -11,6 +11,7 @@ export const checkOfflineScreens = async () => {
     const offlineScreens = await prisma.screen.findMany({
       where: {
         status: 'ONLINE',
+        isDeleted: false,
         lastSeenAt: {
           lt: cutoffDate
         }

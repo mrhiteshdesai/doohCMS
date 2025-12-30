@@ -99,7 +99,23 @@ export const pairScreen = async (req: Request, res: Response) => {
 export const getScreens = async (req: Request, res: Response) => {
   try {
     const tenantId = (req as any).user.tenantId;
-    const screens = await screenService.getTenantScreens(tenantId);
+    
+    // Check for 'deleted' (frontend) or 'includeDeleted' (api) params
+    const showDeletedOnly = req.query.deleted === 'true' || req.query.archived === 'true';
+    const includeDeleted = showDeletedOnly || req.query.includeDeleted === 'true';
+
+    const screens = await screenService.getTenantScreens(tenantId, includeDeleted);
+    
+    // If specifically asking for deleted/archived screens, filter for them
+    if (showDeletedOnly) {
+        const archived = screens.filter(s => s.isDeleted);
+        return res.status(200).json(archived);
+    }
+    
+    // Otherwise return active screens (unless includeDeleted was explicitly true without archived/deleted flag)
+    // But getTenantScreens already filters by default if includeDeleted is false.
+    // If includeDeleted is true but showDeletedOnly is false, we return all (active + deleted).
+    
     res.status(200).json(screens);
   } catch (error: any) {
     res.status(500).json({ message: error.message });

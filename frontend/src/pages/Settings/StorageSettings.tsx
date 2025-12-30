@@ -94,6 +94,103 @@ const StorageSettings: React.FC<Props> = ({ settings, systemSettings, onChange, 
         </div>
       )}
 
+      {/* Tenant S3 Configuration (Legacy/Fallback or Bring Your Own Storage) */}
+      {!systemSettings && (
+         <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+           <h3 className="text-lg font-medium text-gray-900 mb-4">Storage Settings</h3>
+           <p className="text-sm text-gray-500 mb-4">
+             Configure your storage preferences. If System Settings are available, those will take precedence.
+           </p>
+           
+           <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
+             <div className="sm:col-span-3">
+               <label htmlFor="awsAccessKeyId" className="block text-sm font-medium text-gray-700">
+                 AWS Access Key ID
+               </label>
+               <div className="mt-1">
+                 <input
+                   type="password"
+                   name="awsAccessKeyId"
+                   id="awsAccessKeyId"
+                   value={settings.config.awsAccessKeyId || ''}
+                   onChange={(e) => onChange('awsAccessKeyId', e.target.value)}
+                   className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+                 />
+               </div>
+             </div>
+
+             <div className="sm:col-span-3">
+               <label htmlFor="awsSecretAccessKey" className="block text-sm font-medium text-gray-700">
+                 AWS Secret Access Key
+               </label>
+               <div className="mt-1">
+                 <input
+                   type="password"
+                   name="awsSecretAccessKey"
+                   id="awsSecretAccessKey"
+                   value={settings.config.awsSecretAccessKey || ''}
+                   onChange={(e) => onChange('awsSecretAccessKey', e.target.value)}
+                   className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+                 />
+               </div>
+             </div>
+
+             <div className="sm:col-span-3">
+               <label htmlFor="awsRegion" className="block text-sm font-medium text-gray-700">
+                 AWS Region
+               </label>
+               <div className="mt-1">
+                 <input
+                   type="text"
+                   name="awsRegion"
+                   id="awsRegion"
+                   value={settings.config.awsRegion || ''}
+                   onChange={(e) => onChange('awsRegion', e.target.value)}
+                   placeholder="us-east-1"
+                   className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+                 />
+               </div>
+             </div>
+
+             <div className="sm:col-span-3">
+               <label htmlFor="awsBucket" className="block text-sm font-medium text-gray-700">
+                 S3 Bucket Name
+               </label>
+               <div className="mt-1">
+                 <input
+                   type="text"
+                   name="awsBucket"
+                   id="awsBucket"
+                   value={settings.config.awsBucket || ''}
+                   onChange={(e) => onChange('awsBucket', e.target.value)}
+                   className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+                 />
+               </div>
+             </div>
+             
+              <div className="sm:col-span-6">
+               <label htmlFor="awsFolderPrefix" className="block text-sm font-medium text-gray-700">
+                 Folder Prefix (Optional)
+               </label>
+               <div className="mt-1">
+                 <input
+                   type="text"
+                   name="awsFolderPrefix"
+                   id="awsFolderPrefix"
+                   value={settings.config.awsFolderPrefix || ''}
+                   onChange={(e) => onChange('awsFolderPrefix', e.target.value)}
+                   placeholder="media/"
+                   className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+                 />
+               </div>
+               <p className="mt-2 text-sm text-gray-500">
+                 Optional prefix for all uploaded files (e.g. "tenant-1/").
+               </p>
+             </div>
+           </div>
+         </div>
+      )}
+
       {/* Existing Tenant Cleanup Settings */}
       <div>
         <h3 className="text-lg font-medium text-gray-900">Maintenance Policy</h3>

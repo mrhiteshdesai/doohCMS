@@ -84,16 +84,23 @@ export const playerCache = {
   },
 
   async getAllFiles() {
-    // WARNING: This loads all blobs into memory! Use with caution.
     const db = await initDB();
-    const files = await db.getAll('media');
-    return files.map(f => ({
-      id: f.id,
-      filename: f.filename,
-      mimeType: f.mimeType,
-      size: f.blob.size,
-      timestamp: f.timestamp
-    }));
+    const tx = db.transaction('media', 'readonly');
+    let cursor = await tx.store.openCursor();
+    
+    const files = [];
+    while (cursor) {
+      const { id, filename, mimeType, blob, timestamp } = cursor.value;
+      files.push({
+        id,
+        filename,
+        mimeType,
+        size: blob.size,
+        timestamp
+      });
+      cursor = await cursor.continue();
+    }
+    return files;
   },
 
   async hasFile(id: string): Promise<boolean> {

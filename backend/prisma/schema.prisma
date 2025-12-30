@@ -226,6 +226,8 @@ model Screen {
   heartbeats       ScreenHeartbeat[]
   logs             ScreenLog[]
   snapshots        ScreenSnapshot[]
+  isDeleted        Boolean             @default(false)
+  deletedAt        DateTime?
 }
 
 model ScreenPairingCode {
@@ -301,7 +303,7 @@ model ProofOfPlay {
   duration   Int
   startedAt  DateTime
   tenantId   String
-  media      MediaFile @relation(fields: [mediaId], references: [id])
+  media      MediaFile @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   playlist   Playlist? @relation(fields: [playlistId], references: [id])
   screen     Screen    @relation(fields: [screenId], references: [id])
   tenant     Tenant    @relation(fields: [tenantId], references: [id])

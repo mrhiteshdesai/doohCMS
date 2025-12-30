@@ -98,7 +98,20 @@ export const generateUptimeReport = async (tenantId: string, startDate?: string,
       // the screen is born UNPAIRED (Offline) until paired.
       // So it starts offline regardless of current status (which might be ONLINE if paired later).
       if (effectiveStart.getTime() === screen.createdAt.getTime()) {
+          // Default assumption: Born offline
           isInitiallyOffline = true;
+
+          // Exception 1: If the first log is "Screen went OFFLINE", it implies we were ONLINE before it.
+          // This covers cases where we missed the initial "Paired" log or manually set to Online.
+          if (logs.length > 0 && logs[0].message.includes('Screen went OFFLINE')) {
+              isInitiallyOffline = false;
+          }
+
+          // Exception 2: If there are NO logs at all, and the screen is currently ONLINE.
+          // This implies it was created/imported as ONLINE and never went offline.
+          if (logs.length === 0 && screen.status === 'ONLINE') {
+              isInitiallyOffline = false;
+          }
       }
 
       if (isInitiallyOffline) {

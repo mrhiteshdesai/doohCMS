@@ -1,6 +1,20 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import * as screenService from '../services/screenService';
+import * as systemSettingsService from '../services/systemSettingsService';
+import fs from 'fs';
+import path from 'path';
+import { S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+
+interface StorageSettings {
+    provider: string;
+    bucket?: string;
+    region?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    endpoint?: string;
+}
 
 export const getSystemBranding = async (req: Request, res: Response) => {
   try {
@@ -57,7 +71,7 @@ export const heartbeat = async (req: Request, res: Response) => {
     const result = await screenService.processHeartbeat(screenId, req.body);
     res.status(200).json(result);
   } catch (error: any) {
-    if (error.code === 'P2025') {
+    if (error.code === 'P2025' || error.message === 'Screen is deleted' || error.message === 'Screen not found') {
         return res.status(401).json({ message: 'Screen not found or deleted' });
     }
     res.status(500).json({ message: error.message });
@@ -164,7 +178,70 @@ export const uploadSnapshot = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'No snapshot file uploaded' });
     }
 
-    const imageUrl = `/uploads/${req.file.filename}`;
+    // Get System Settings to check storage provider
+    const systemSettings = await systemSettingsService.getSystemSettings();
+    const settings = systemSettings?.storage as unknown as StorageSettings | undefined;
+    const isS3 = settings?.provider === 's3';
+    let imageUrl = '';
+
+    if (isS3 && settings?.bucket) {
+        // Upload to S3
+        const s3Client = new S3Client({
+            region: settings.region,
+            credentials: {
+                accessKeyId: settings.accessKeyId || '',
+                secretAccessKey: settings.secretAccessKey || '',
+            },
+            endpoint: settings.endpoint || undefined,
+            forcePathStyle: !!settings.endpoint,
+        });
+
+        const fileStream = fs.createReadStream(req.file.path);
+        
+        // Calculate relative path from the actual file location
+        const uploadDir = path.join(__dirname, '../../uploads');
+        const relativePath = path.relative(uploadDir, req.file.destination).split(path.sep).join('/');
+        
+        const key = `snapshots/${relativePath}/${req.file.filename}`;
+
+        try {
+            const upload = new Upload({
+                client: s3Client,
+                params: {
+                    Bucket: settings.bucket,
+                    Key: key,
+                    Body: fileStream,
+                    ContentType: req.file.mimetype,
+                },
+            });
+
+            await upload.done();
+            
+            // Construct S3 URL
+            if (settings.endpoint) {
+                 imageUrl = `${settings.endpoint}/${settings.bucket}/${key}`;
+            } else {
+                 imageUrl = `https://${settings.bucket}.s3.${settings.region}.amazonaws.com/${key}`;
+            }
+
+            // Remove local file
+            fs.unlinkSync(req.file.path);
+        } catch (err) {
+            console.error('S3 Upload Error:', err);
+            throw new Error('Failed to upload snapshot to S3');
+        }
+    } else {
+        // Local Storage
+        // Calculate relative path from the actual file location to ensure consistency
+        // This avoids relying on req.fileRelativePath which might be lost or inconsistent
+        const uploadDir = path.join(__dirname, '../../uploads');
+        const relativePath = path.relative(uploadDir, req.file.destination).split(path.sep).join('/');
+        
+        // Ensure relativePath doesn't start with / if it's empty
+        const prefix = relativePath && relativePath !== '.' ? `${relativePath}/` : '';
+        
+        imageUrl = `/uploads/${prefix}${req.file.filename}`;
+    }
     console.log(`[Snapshot] Saved to ${imageUrl}`);
     
     await prisma.screenSnapshot.create({

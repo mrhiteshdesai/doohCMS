@@ -6,12 +6,14 @@ export const getDashboardStats = async (tenantId: string) => {
     const [
       totalScreens,
       onlineScreens,
+      deletedScreens,
       totalPlaylists,
       totalMedia,
       storageStats
     ] = await Promise.all([
-      prisma.screen.count({ where: { tenantId } }),
-      prisma.screen.count({ where: { tenantId, status: 'ONLINE' } }),
+      prisma.screen.count({ where: { tenantId, isDeleted: false } }),
+      prisma.screen.count({ where: { tenantId, status: 'ONLINE', isDeleted: false } }),
+      prisma.screen.count({ where: { tenantId, isDeleted: true } }),
       prisma.playlist.count({ where: { tenantId } }),
       prisma.mediaFile.count({ where: { tenantId } }),
       prisma.mediaFile.aggregate({ where: { tenantId }, _sum: { size: true } })
@@ -84,7 +86,8 @@ export const getDashboardStats = async (tenantId: string) => {
       screens: {
         total: totalScreens,
         online: onlineScreens,
-        offline: totalScreens - onlineScreens
+        offline: totalScreens - onlineScreens,
+        deleted: deletedScreens
       },
       content: {
         playlists: totalPlaylists,

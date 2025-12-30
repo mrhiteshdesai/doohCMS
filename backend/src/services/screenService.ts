@@ -95,6 +95,14 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
   // Update screen status and potentially store telemetry in config for quick access
   const screen = await prisma.screen.findUnique({ where: { id: screenId } });
   
+  if (!screen) {
+      throw new Error('Screen not found');
+  }
+
+  if (screen.isDeleted) {
+      throw new Error('Screen is deleted');
+  }
+  
   let newConfig = screen?.config as any || {};
   if (metadata) {
     const currentTelemetry = newConfig.telemetry || {};
@@ -436,27 +444,26 @@ export const deleteScreen = async (screenId: string, tenantId: string) => {
       });
     }
 
-    // 2. Delete related data that would block deletion due to FK constraints
-    // ProofOfPlay (No Cascade)
-    await tx.proofOfPlay.deleteMany({ where: { screenId } });
-    
-    // ScreenGroupMember (Has Cascade, but good to be explicit or if cascade fails)
+    // 2. Remove from Groups (active association)
     await tx.screenGroupMember.deleteMany({ where: { screenId } });
 
-    // Schedules (Set screenId to null, don't delete schedule)
+    // 3. Remove from Schedules (active association)
     await tx.schedule.updateMany({
       where: { screenId },
       data: { screenId: null }
     });
 
-    // 3. Delete related data that is owned by screen (usually cascaded or simple delete)
-    await tx.screenLog.deleteMany({ where: { screenId } });
-    await tx.screenSnapshot.deleteMany({ where: { screenId } });
-    await tx.screenHeartbeat.deleteMany({ where: { screenId } });
-    
-    // 4. Delete the screen
-    return tx.screen.delete({
-      where: { id: screenId }
+    // 4. Soft Delete the screen
+    // We RETAIN ProofOfPlay, Logs, Snapshots, etc. for archive/history
+    return tx.screen.update({
+      where: { id: screenId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: 'DELETED',
+        pairingCodeId: null,
+        activePlaylistId: null
+      }
     });
   });
 };
@@ -508,9 +515,14 @@ export const requestSnapshot = async (screenId: string, tenantId: string) => {
 };
 
 // CMS: Get Screens
-export const getTenantScreens = async (tenantId: string) => {
+export const getTenantScreens = async (tenantId: string, includeDeleted: boolean = false) => {
+  const where: any = { tenantId };
+  if (!includeDeleted) {
+    where.isDeleted = false;
+  }
+
   const screens = await prisma.screen.findMany({
-    where: { tenantId },
+    where,
     orderBy: { lastSeenAt: 'desc' },
     include: {
       activePlaylist: true

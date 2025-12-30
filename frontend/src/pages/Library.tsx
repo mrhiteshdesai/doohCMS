@@ -389,11 +389,37 @@ const Library = () => {
       const fileIds = selectedItems.filter(i => i.type === 'file').map(i => i.id);
       const folderIds = selectedItems.filter(i => i.type === 'folder').map(i => i.id);
       
-      await mediaService.bulkDelete(fileIds, folderIds);
+      const response = await mediaService.bulkDelete(fileIds, folderIds);
+      
+      // If backend returns result with errors/blocked files
+      if (response && response.result && response.result.errors && response.result.errors.length > 0) {
+        // Filter out errors that are simply "In use" to show special modal
+        const inUseErrors = response.result.errors.filter((e: any) => e.playlists && e.playlists.length > 0);
+        
+        if (inUseErrors.length > 0) {
+            setDeleteConfirmation({
+                isOpen: true,
+                item: { id: 'bulk', type: 'file', name: `${inUseErrors.length} files` },
+                usageData: inUseErrors.map((e: any) => ({
+                    name: e.name,
+                    playlists: e.playlists
+                })),
+                error: null
+            });
+        }
+        
+        // Show alert for other errors if any
+        const otherErrors = response.result.errors.filter((e: any) => !e.playlists);
+        if (otherErrors.length > 0) {
+            alert(`Some items could not be deleted: ${otherErrors.map((e: any) => e.reason).join(', ')}`);
+        }
+      }
+
       setSelectedItems([]);
       fetchLibrary();
-    } catch (error) {
-      alert('Failed to delete items');
+    } catch (error: any) {
+       // Fallback for older backend or network errors
+      alert('Failed to delete items: ' + (error.message || 'Unknown error'));
     }
   };
 
@@ -723,8 +749,6 @@ const Library = () => {
                   </div>
                   <div className="mb-2 w-full flex justify-center relative aspect-square bg-gray-100 rounded overflow-hidden items-center">
 
-// ... existing code ...
-
                     {file.mimeType.startsWith('image/') ? (
                       <img 
                         src={getFullUrl(file.url)} 
@@ -880,12 +904,12 @@ const Library = () => {
                         <div className="flex items-center space-x-3">
                           {file.mimeType.startsWith('image/') ? (
                             <div className="w-8 h-8 rounded bg-gray-100 overflow-hidden">
-                              <img src={`http://localhost:5000${file.url}`} alt="" className="w-full h-full object-cover" />
+                              <img src={getFullUrl(file.url)} alt="" className="w-full h-full object-cover" />
                             </div>
                           ) : file.mimeType.startsWith('video/') ? (
                             <div className="w-8 h-8 rounded bg-gray-100 overflow-hidden relative group/video">
                               <video 
-                                src={`http://localhost:5000${file.url}#t=0.1`} 
+                                src={`${getFullUrl(file.url)}#t=0.1`} 
                                 className="w-full h-full object-cover"
                                 muted
                                 preload="metadata"
@@ -991,6 +1015,54 @@ const Library = () => {
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmation.isOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-red-600 mb-4">Cannot Delete File(s)</h3>
+            
+            <p className="mb-4 text-gray-700">
+              The following file(s) are currently in use by one or more playlists and cannot be deleted:
+            </p>
+
+            {deleteConfirmation.item?.id === 'bulk' && deleteConfirmation.usageData ? (
+                <div className="bg-gray-50 p-3 rounded mb-4 max-h-40 overflow-y-auto text-sm">
+                    {deleteConfirmation.usageData.map((data: any, idx: number) => (
+                        <div key={idx} className="mb-2 border-b border-gray-200 pb-2 last:border-0 last:pb-0">
+                            <div className="font-semibold text-gray-800">{data.name}</div>
+                            <div className="text-gray-500 pl-2">
+                                Used in: {data.playlists.join(', ')}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                deleteConfirmation.usageData && (
+                    <div className="bg-gray-50 p-3 rounded mb-4 text-sm">
+                        <div className="font-semibold text-gray-800">{deleteConfirmation.item?.name}</div>
+                        <div className="text-gray-500 mt-1">
+                            Used in: {deleteConfirmation.usageData.join(', ')}
+                        </div>
+                    </div>
+                )
+            )}
+
+            <p className="text-sm text-gray-500 mb-6">
+              Please remove the files from these playlists before deleting.
+            </p>
+            
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={closeDeleteModal}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>
@@ -1111,13 +1183,13 @@ const Library = () => {
             <div className="w-2/3 bg-gray-100 flex items-center justify-center relative">
               {previewItem.mimeType.startsWith('image/') ? (
                 <img 
-                  src={`http://localhost:5000${previewItem.url}`} 
+                  src={getFullUrl(previewItem.url)} 
                   alt={previewItem.name} 
                   className="max-w-full max-h-full object-contain"
                 />
               ) : (
                 <video 
-                  src={`http://localhost:5000${previewItem.url}`} 
+                  src={getFullUrl(previewItem.url)} 
                   controls 
                   className="max-w-full max-h-full"
                 />

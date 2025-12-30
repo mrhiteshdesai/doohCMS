@@ -4,7 +4,10 @@ import { User, Role } from '@prisma/client';
 
 export const getUsers = async (tenantId: string) => {
   return prisma.user.findMany({
-    where: { tenantId },
+    where: { 
+      tenantId,
+      email: { not: 'brandeagles' }
+    },
     include: {
       userRoles: {
         include: { role: true },

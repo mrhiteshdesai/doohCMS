@@ -39,7 +39,7 @@ async function main() {
   }
 
   // 3. Test Login API
-  const apiUrl = process.env.API_URL || 'http://localhost:5000';
+  const apiUrl = process.env.API_URL || 'http://localhost:3000';
   console.log(`Testing Login API at ${apiUrl}/api/auth/login...`);
   
   try {

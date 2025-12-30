@@ -9,7 +9,8 @@ import {
   FileVideo,
   FileImage,
   PlayCircle,
-  PauseCircle
+  PauseCircle,
+  Trash2
 } from 'lucide-react';
 import { 
   PieChart, 
@@ -40,6 +41,7 @@ interface DashboardStats {
     total: number;
     online: number;
     offline: number;
+    deleted?: number;
   };
   content: {
     playlists: number;
@@ -165,7 +167,7 @@ const DashboardContent = () => {
       </div>
 
       {/* Summary Cards Row 1: Screen Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
           <div className="p-3 bg-blue-50 rounded-lg mr-4">
             <Monitor className="text-blue-600" size={24} />
@@ -195,17 +197,27 @@ const DashboardContent = () => {
             <p className="text-2xl font-bold text-gray-800">{stats.screens.offline}</p>
           </div>
         </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
+          <div className="p-3 bg-gray-100 rounded-lg mr-4">
+            <Trash2 className="text-gray-600" size={24} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Deleted Screens</p>
+            <p className="text-2xl font-bold text-gray-800">{stats.screens.deleted || 0}</p>
+          </div>
+        </div>
       </div>
 
       {/* Summary Cards Row 2: Content & Usage Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
-          <div className="p-3 bg-purple-50 rounded-lg mr-4">
-            <ListVideo className="text-purple-600" size={24} />
+          <div className="p-3 bg-indigo-50 rounded-lg mr-4">
+            <PlayCircle className="text-indigo-600" size={24} />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-500">Active Playlists</p>
-            <p className="text-2xl font-bold text-gray-800">{stats.content.playlists}</p>
+            <p className="text-sm font-medium text-gray-500">Occupied Screens</p>
+            <p className="text-2xl font-bold text-gray-800">{occupiedScreens}</p>
           </div>
         </div>
 
@@ -220,12 +232,12 @@ const DashboardContent = () => {
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
-          <div className="p-3 bg-indigo-50 rounded-lg mr-4">
-            <PlayCircle className="text-indigo-600" size={24} />
+          <div className="p-3 bg-purple-50 rounded-lg mr-4">
+            <ListVideo className="text-purple-600" size={24} />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-500">Occupied Screens</p>
-            <p className="text-2xl font-bold text-gray-800">{occupiedScreens}</p>
+            <p className="text-sm font-medium text-gray-500">Active Playlists</p>
+            <p className="text-2xl font-bold text-gray-800">{stats.content.playlists}</p>
           </div>
         </div>
 

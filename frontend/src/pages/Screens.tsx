@@ -280,6 +280,7 @@ const Screens = () => {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 text-sm">
                   <th className="px-6 py-4 font-medium">Screen Name</th>
+                  <th className="px-6 py-4 font-medium">Location</th>
                   <th className="px-6 py-4 font-medium">Status</th>
                   <th className="px-6 py-4 font-medium">Type</th>
                   <th className="px-6 py-4 font-medium">Playlist</th>
@@ -315,6 +316,9 @@ const Screens = () => {
                             <p className="text-xs text-gray-400">ID: {screen.id.substring(0, 8)}...</p>
                           </div>
                         </Link>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600 text-sm">
+                        {screen.location?.city || screen.location?.label || '-'}
                       </td>
                       <td className="px-6 py-4">
                         {showDeleted ? (

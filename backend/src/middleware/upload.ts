@@ -19,6 +19,37 @@ const storage = multer.diskStorage({
   },
 });
 
+// Create tenant and date-based folder structure middleware
+const createUploadFolder = (req: any, file: any, cb: any) => {
+  const date = new Date();
+  const year = date.getFullYear().toString();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  
+  // Use tenantId if available, otherwise 'common' or similar
+  const tenantId = req.user?.tenantId || 'common';
+  
+  const folderPath = path.join(uploadDir, tenantId, year, month, day);
+  
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath, { recursive: true });
+  }
+  
+  // Attach relative path to request for later use
+  req.fileRelativePath = `${tenantId}/${year}/${month}/${day}`;
+  
+  cb(null, folderPath);
+};
+
+// Override storage destination to use dynamic folders
+const dynamicStorage = multer.diskStorage({
+  destination: createUploadFolder,
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   // Allow images and videos
   if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
@@ -29,7 +60,7 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
 };
 
 const upload = multer({ 
-  storage: storage,
+  storage: dynamicStorage,
   fileFilter: fileFilter,
   limits: {
     fileSize: 5 * 1024 * 1024 * 1024, // 5GB limit

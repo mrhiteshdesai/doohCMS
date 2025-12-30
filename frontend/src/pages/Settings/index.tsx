@@ -50,7 +50,10 @@ const SettingsPage = () => {
       // Only attempt to fetch system settings if user is admin or Organization Admin
       // We'll rely on backend enforcement, but good to avoid 403s in console if possible
       const isSystemAdmin = user?.role === 'admin' || 
-                            user?.roles?.some((r: any) => r.name === 'admin' || r.name === 'Organization Admin') ||
+                            (Array.isArray(user?.roles) && user.roles.some((r: any) => 
+                                (typeof r === 'string' && (r === 'admin' || r === 'Organization Admin')) ||
+                                (typeof r === 'object' && r.name && (r.name === 'admin' || r.name === 'Organization Admin'))
+                            )) ||
                             (user?.permissions && user.permissions.includes('*'));
 
       if (isSystemAdmin) {

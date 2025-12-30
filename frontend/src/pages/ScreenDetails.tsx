@@ -7,9 +7,10 @@ import PermissionGuard from '../components/PermissionGuard';
 import { 
   Monitor, Activity, Terminal, Camera, RefreshCw, Power, ArrowLeft, 
   Clock, Save, FileText, Database, PlaySquare, Settings, Download, 
-  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2
+  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getFullUrl } from '../utils/url';
 
 const ScreenDetails = () => {
   const { id } = useParams();
@@ -20,6 +21,7 @@ const ScreenDetails = () => {
   const [commandLoading, setCommandLoading] = useState(false);
   const [browserSettings, setBrowserSettings] = useState<any>({});
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
 
   const fetchScreen = async () => {
     try {
@@ -235,8 +237,7 @@ const ScreenDetails = () => {
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'playlists', label: 'Playlists' },
-            { id: 'configuration', label: 'Screen Configuration' },
-            { id: 'settings', label: 'Screen Settings' },
+            { id: 'settings', label: 'Screen Configuration' },
             { id: 'downloads', label: 'Downloads' },
             { id: 'snapshots', label: 'Snapshots' },
             { id: 'logs', label: 'Logs' }
@@ -455,14 +456,7 @@ const ScreenDetails = () => {
           </div>
         )}
 
-        {/* Configuration Placeholder (kept as coming soon) */}
-        {activeTab === 'configuration' && (
-          <div className="p-12 text-center text-gray-500">
-            <Settings size={48} className="mx-auto mb-4 text-gray-300" />
-            <h3 className="text-lg font-medium text-gray-900">Coming Soon</h3>
-            <p>The configuration module is currently under development.</p>
-          </div>
-        )}
+
 
         {/* Screen Settings */}
         {activeTab === 'settings' && (
@@ -677,10 +671,17 @@ const ScreenDetails = () => {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {screen.snapshots && screen.snapshots.length > 0 ? (
                 screen.snapshots.map((snap: any) => (
-                  <div key={snap.id} className="group relative rounded-lg overflow-hidden border border-gray-200">
-                    <img src={snap.imageUrl} alt="Snapshot" className="w-full h-auto object-cover" />
+                  <div 
+                    key={snap.id} 
+                    className="group relative rounded-lg overflow-hidden border border-gray-200 cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02]"
+                    onClick={() => setSelectedSnapshot(snap)}
+                  >
+                    <img src={getFullUrl(snap.imageUrl)} alt="Snapshot" className="w-full h-auto object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-2">
                       {new Date(snap.createdAt).toLocaleString()}
+                    </div>
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                         <Maximize className="text-white drop-shadow-md" size={32} />
                     </div>
                   </div>
                 ))
@@ -691,6 +692,46 @@ const ScreenDetails = () => {
           </div>
         )}
       </div>
+      {/* Snapshot Preview Modal */}
+      {selectedSnapshot && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-90 p-4" onClick={() => setSelectedSnapshot(null)}>
+           <div className="relative max-w-7xl w-full max-h-screen flex flex-col items-center" onClick={e => e.stopPropagation()}>
+              <div className="absolute top-4 right-4 z-10 flex gap-4">
+                  <a 
+                    href={getFullUrl(selectedSnapshot.imageUrl)} 
+                    download={`snapshot-${selectedSnapshot.id}.png`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-white transition-all backdrop-blur-sm"
+                    title="Download Original"
+                  >
+                      <Download size={24} />
+                  </a>
+                  <button 
+                    onClick={() => setSelectedSnapshot(null)}
+                    className="p-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full text-white transition-all backdrop-blur-sm"
+                  >
+                      <X size={24} />
+                  </button>
+              </div>
+              
+              <img 
+                src={getFullUrl(selectedSnapshot.imageUrl)} 
+                alt="Snapshot Preview" 
+                className="max-h-[90vh] w-auto object-contain rounded shadow-2xl" 
+              />
+              
+              <div className="mt-4 text-white text-center space-y-1">
+                  <h3 className="text-xl font-bold">{screen.name}</h3>
+                  <p className="text-sm opacity-70 font-mono">ID: {screen.id}</p>
+                  <p className="text-lg">
+                    {new Date(selectedSnapshot.createdAt).toLocaleString()} 
+                    {screen.location?.city ? ` • ${screen.location.city}` : (screen.location?.label ? ` • ${screen.location.label}` : '')}
+                  </p>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

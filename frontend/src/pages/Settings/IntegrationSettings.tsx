@@ -70,6 +70,9 @@ const IntegrationSettings: React.FC<Props> = ({ settings, onChange }) => {
             One URL per line. Used by the News Ticker widget.
           </p>
         </div>
+
+        {/* AWS S3 Configuration Removed - Moved to Storage & Maintenance */}
+
       </div>
     </div>
   );

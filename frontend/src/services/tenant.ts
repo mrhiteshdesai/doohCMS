@@ -42,6 +42,13 @@ export interface TenantSettings {
     googleMapsApiKey?: string;
     newsFeedUrls?: string[];
     
+    // AWS S3 Configuration (Tenant Level)
+    awsAccessKeyId?: string;
+    awsSecretAccessKey?: string;
+    awsRegion?: string;
+    awsBucket?: string;
+    awsFolderPrefix?: string;
+    
     // Player Management
     defaultPlaylistId?: string;
     heartbeatInterval?: number;

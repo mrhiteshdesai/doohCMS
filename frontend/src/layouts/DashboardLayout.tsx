@@ -200,6 +200,7 @@ const DashboardLayout = () => {
               src={getFullUrl(logoUrl)} 
               alt="Logo" 
               className="h-32 w-auto object-contain" 
+              onError={() => setLogoUrl(null)}
             />
           ) : (
             <div className="flex items-center justify-center space-x-2">
