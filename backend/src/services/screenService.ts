@@ -82,6 +82,7 @@ export const checkPairingStatus = async (code: string) => {
         id: screen.id,
         name: screen.name,
         orientation: screen.orientation,
+        location: screen.location,
         config: screen.config
       }
     };

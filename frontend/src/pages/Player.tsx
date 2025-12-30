@@ -364,7 +364,9 @@ const Player = () => {
       });
 
       const observer = new MutationObserver((mutations) => {
+          if (!mutations) return;
           mutations.forEach((mutation) => {
+              if (!mutation.addedNodes) return;
               mutation.addedNodes.forEach((node: any) => {
                   if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') {
                       node.volume = vol;
@@ -456,10 +458,20 @@ const Player = () => {
   // Content State
   const [currentPlaylist, setCurrentPlaylist] = useState<Playlist | null>(null);
   const currentPlaylistRef = useRef<Playlist | null>(null);
+  const screenDataRef = useRef<any>(null);
+  const pairingCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     currentPlaylistRef.current = currentPlaylist;
   }, [currentPlaylist]);
+
+  useEffect(() => {
+    screenDataRef.current = screenData;
+  }, [screenData]);
+
+  useEffect(() => {
+    pairingCodeRef.current = pairingCode;
+  }, [pairingCode]);
 
   const [mediaUrls, setMediaUrls] = useState<Map<string, string>>(new Map());
   
@@ -727,12 +739,15 @@ const Player = () => {
                 overlay.style.minWidth = '200px';
 
                 // Data Preparation
-                const screenName = screenData?.name || 'Unknown Screen';
-                const screenId = pairingCode || 'N/A';
+                const currentScreenData = screenDataRef.current;
+                const currentPairingCode = pairingCodeRef.current;
+
+                const screenName = currentScreenData?.name || 'Unknown Screen';
+                const screenId = currentPairingCode || 'N/A';
                 // Try to find location in screenData if exists, otherwise placeholder or remove
-                const location = screenData?.location ? 
-                    (typeof screenData.location === 'string' ? screenData.location : 
-                    (screenData.location.city ? `${screenData.location.city}, ${screenData.location.country || ''}` : 'Unknown Location')) 
+                const location = currentScreenData?.location ? 
+                    (typeof currentScreenData.location === 'string' ? currentScreenData.location : 
+                    (currentScreenData.location.city ? `${currentScreenData.location.city}, ${currentScreenData.location.country || ''}` : 'Unknown Location')) 
                     : 'Unknown Location';
                 const timestamp = new Date().toLocaleString();
 
@@ -796,7 +811,8 @@ const Player = () => {
             const telemetry: any = {};
             
             // Add cached files count - Lightweight check
-            if (beatCount === 1 || beatCount % 10 === 0) {
+            const hasNewDownloads = downloadReportsRef.current.length > 0;
+            if (beatCount === 1 || beatCount % 10 === 0 || hasNewDownloads) {
                 try {
                     const count = await playerCache.getFileCount();
                     telemetry.cachedFilesCount = count;
