@@ -39,7 +39,8 @@ interface PlaylistThumbnailProps {
 
 const getFullUrl = (url: string) => {
   if (url.startsWith('http')) return url;
-  return `http://localhost:5000${url}`;
+  const base = import.meta.env.VITE_API_URL || '';
+  return `${base}${url}`;
 };
 
 const PlaylistThumbnail: React.FC<PlaylistThumbnailProps> = ({ playlist, className = '' }) => {

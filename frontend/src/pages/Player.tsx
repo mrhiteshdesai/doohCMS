@@ -8,7 +8,9 @@ import { applyTheme } from '../utils/colors';
 import { playerCache } from '../lib/playerCache';
 import { playerSync } from '../lib/playerSync';
 
-const API_URL = '/api';
+const API_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api';
 
 interface Media {
   id: string;

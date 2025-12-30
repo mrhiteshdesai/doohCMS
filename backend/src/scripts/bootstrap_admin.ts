@@ -6,8 +6,8 @@ dotenv.config();
 
 async function main() {
   const tenantName = process.env.ADMIN_TENANT_NAME || 'Default Tenant';
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@smartags.com';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
   const adminName = process.env.ADMIN_NAME || 'Admin';
 
   if (!adminEmail || !adminPassword) {
