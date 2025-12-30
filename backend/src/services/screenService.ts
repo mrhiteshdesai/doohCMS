@@ -695,7 +695,7 @@ export const getScreenContent = async (screenId: string) => {
       return false;
     };
 
-    const isTimeInRange = (startTime: string, endTime: string | null | undefined, nowTime: string) => {
+    const isTimeInRange = (startTime: string | null | undefined, endTime: string | null | undefined, nowTime: string) => {
       if (!startTime) return false;
       if (endTime) {
         return startTime <= nowTime && nowTime <= endTime;
