@@ -1,4 +1,4 @@
-import { Prisma, ScheduleRecurrence } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import prisma from '../prisma';
 
 // use shared prisma client
@@ -40,7 +40,7 @@ export const createSchedule = async (tenantId: string, data: any) => {
   const created = await prisma.schedule.create({
     data: {
       name,
-      description,
+      // description: description ?? undefined,
       tenantId,
       playlistId,
       screenId,
@@ -49,7 +49,7 @@ export const createSchedule = async (tenantId: string, data: any) => {
       endDate: endDate ? new Date(endDate) : null,
       startTime,
       endTime,
-      recurrence: (recurrence as ScheduleRecurrence) || 'NONE',
+      recurrence: (recurrence as any) || 'NONE',
       daysOfWeek: daysOfWeek ? JSON.stringify(daysOfWeek) : undefined,
       timezone,
     },
@@ -67,7 +67,7 @@ export const createSchedule = async (tenantId: string, data: any) => {
 
 export const getSchedules = async (
   tenantId: string,
-  params: { search?: string; targetType?: 'SCREEN' | 'GROUP'; recurrence?: ScheduleRecurrence } = {}
+  params: { search?: string; targetType?: 'SCREEN' | 'GROUP'; recurrence?: any } = {}
 ) => {
   const where: any = { tenantId };
   if (params.search) {
