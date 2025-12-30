@@ -708,7 +708,7 @@ export const getScreenContent = async (screenId: string) => {
       const nowTime = `${hh}:${mm}`;
       if (!isDateInRange(s.startDate, s.endDate ?? null, s.recurrence as any, nowDate)) return false;
       if (!isDayMatch(s.recurrence as any, s.daysOfWeek as any, dow)) return false;
-      if (!isTimeInRange(s.startTime, s.endTime || '', nowTime)) return false;
+      if (!isTimeInRange(s.startTime, (s.endTime || '') as string, nowTime)) return false;
       return true;
     });
 
