@@ -10,7 +10,8 @@
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "verify-schedule": "node -r ts-node/register src/scripts/verify_schedule.ts"
+    "verify-schedule": "node -r ts-node/register src/scripts/verify_schedule.ts",
+    "seed-admin": "node -r ts-node/register src/scripts/bootstrap_admin.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.1",
