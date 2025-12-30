@@ -105,7 +105,7 @@ export const uploadFiles = async (req: Request, res: Response) => {
       } else {
           // Local Storage
         // Calculate relative path from the actual file location to ensure consistency
-        const uploadDir = path.join(process.cwd(), 'uploads');
+        const uploadDir = path.join(__dirname, '../../uploads');
         const relativePath = path.relative(uploadDir, file.destination).split(path.sep).join('/');
           
           // Ensure relativePath doesn't start with / if it's empty

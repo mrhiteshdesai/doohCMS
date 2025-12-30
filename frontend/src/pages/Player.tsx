@@ -62,69 +62,46 @@ const getMediaType = (mimeType: string): 'IMAGE' | 'VIDEO' => {
 };
 
 const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrls: Map<string, string>; playlistId: string }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [executionId, setExecutionId] = useState(0);
   const [currentItem, setCurrentItem] = useState<PlaylistItem | null>(null);
+  const [mediaLoaded, setMediaLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const lastTimeUpdateRef = useRef<number>(Date.now());
+  const stuckCounterRef = useRef<number>(0);
 
   // Memoize sortedItems to ensure stability across renders if content hasn't changed
-  // We use JSON.stringify to compare content deep equality instead of reference
   const sortedItems = useMemo(() => {
     return zone.items ? [...zone.items].sort((a, b) => a.order - b.order) : [];
   }, [JSON.stringify(zone.items)]);
 
+  // Reset execution when items change
+  useEffect(() => {
+      setExecutionId(0);
+  }, [sortedItems]);
+
   useEffect(() => {
     if (sortedItems.length > 0) {
-      // Reset index if out of bounds (e.g. playlist changed)
-      if (currentIndex >= sortedItems.length) {
-        setCurrentIndex(0);
-        const newItem = sortedItems[0];
-        if (newItem.id !== currentItem?.id) setCurrentItem(newItem);
-      } else {
-        const newItem = sortedItems[currentIndex];
-        // Only update if ID changed to prevent unnecessary re-renders/effect triggers
-        if (newItem.id !== currentItem?.id) {
-          setCurrentItem(newItem);
-        }
-      }
+        const index = executionId % sortedItems.length;
+        const newItem = sortedItems[index];
+        
+        setCurrentItem(newItem);
+        // Always reset state for new execution, even if item ID is same (looping single item)
+        setMediaLoaded(false);
+        setRetryCount(0);
+        lastTimeUpdateRef.current = Date.now();
+        stuckCounterRef.current = 0;
     } else {
       setCurrentItem(null);
     }
-  }, [sortedItems, currentIndex]); // sortedItems is now stable based on content
+  }, [executionId, sortedItems]);
 
-  useEffect(() => {
-    if (!currentItem) return;
-
-    // Log Start
-    const startTime = Date.now();
-
-    let timer: ReturnType<typeof setTimeout>;
-
-    if (!currentItem.media) {
-       const duration = (currentItem.duration || 10) * 1000;
-       timer = setTimeout(() => {
-          nextItem();
-       }, duration);
-       return () => { if (timer) clearTimeout(timer); };
-    }
-
-    const type = getMediaType(currentItem.media.mimeType);
-
-    if (type === 'IMAGE') {
-      const duration = (currentItem.duration || 10) * 1000;
-      timer = setTimeout(() => {
-        logPoP(startTime, duration / 1000);
-        nextItem();
-      }, duration);
-    }
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [currentItem]);
+  const nextItem = () => {
+    if (sortedItems.length === 0) return;
+    setExecutionId((prev) => prev + 1);
+  };
 
   const logPoP = (startedAt: number, duration: number) => {
     if (!currentItem || !currentItem.media) {
-        console.warn('[Player] logPoP skipped: No current item or media');
         return;
     }
     console.debug(`[Player] Logging PoP: ${currentItem.media.id} (${duration}s)`);
@@ -136,10 +113,91 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
     });
   };
 
-  const nextItem = () => {
-    if (sortedItems.length === 0) return;
-    setCurrentIndex((prev) => (prev + 1) % sortedItems.length);
-  };
+  // Main Playback Logic
+  useEffect(() => {
+    if (!currentItem) return;
+
+    let timer: ReturnType<typeof setTimeout>;
+    let watchdog: ReturnType<typeof setInterval>;
+
+    // 1. Non-Media Items (Widgets/Empty)
+    if (!currentItem.media) {
+       const duration = (currentItem.duration || 10) * 1000;
+       timer = setTimeout(() => {
+          nextItem();
+       }, duration);
+       return () => clearTimeout(timer);
+    }
+
+    const type = getMediaType(currentItem.media.mimeType);
+
+    // 2. IMAGE Handling
+    if (type === 'IMAGE') {
+      if (mediaLoaded) {
+          // Only start duration timer AFTER image is loaded
+          const duration = (currentItem.duration || 10) * 1000;
+          const startTime = Date.now();
+          timer = setTimeout(() => {
+            logPoP(startTime, duration / 1000);
+            nextItem();
+          }, duration);
+      } else {
+          // Safety timeout for loading (e.g. 10s)
+          // If image doesn't load/error in 10s, skip it
+          timer = setTimeout(() => {
+              console.warn(`[Player] Image load timeout for ${currentItem.id}, skipping`);
+              nextItem();
+          }, 10000);
+      }
+    } 
+    
+    // 3. VIDEO Handling
+    else if (type === 'VIDEO') {
+        // Watchdog for frozen video
+        watchdog = setInterval(() => {
+            if (!videoRef.current) return;
+            
+            const video = videoRef.current;
+            const now = Date.now();
+            
+            // Check if stuck
+            // We consider it stuck if it's not paused, not ended, but currentTime hasn't moved for 2s
+            if (!video.paused && !video.ended && video.readyState > 2) {
+                if (now - lastTimeUpdateRef.current > 2000) {
+                    stuckCounterRef.current++;
+                    
+                    // Try to nudge it
+                    if (stuckCounterRef.current === 2) {
+                        console.warn(`[Player] Video stuck, attempting to nudge play...`);
+                        video.pause();
+                        video.play().catch(e => console.error("Re-play failed", e));
+                    }
+                    
+                    // Force skip if stuck for too long (e.g. 8s)
+                    if (stuckCounterRef.current > 4) {
+                        console.error(`[Player] Video frozen for too long, skipping ${currentItem.id}`);
+                        nextItem();
+                    }
+                } else {
+                    stuckCounterRef.current = 0;
+                }
+            }
+            
+            // Handle Autoplay blocked or Not Started
+            if (video.paused && !video.ended && stuckCounterRef.current === 0) {
+                 // Try to force play if it's paused unexpectedly
+                 video.play().catch(() => {});
+            }
+            
+        }, 1000);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (watchdog) clearInterval(watchdog);
+    };
+  }, [currentItem, mediaLoaded]);
+
 
   // RETRY LOGIC for Media Loading
   const [retryCount, setRetryCount] = useState(0);
@@ -149,22 +207,31 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
       console.error(`[Player] Media error for item ${currentItem?.id} (Attempt ${retryCount + 1}/${maxRetries + 1})`, e);
       
       if (retryCount < maxRetries) {
-          const backoffDelay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+          const backoffDelay = Math.pow(2, retryCount) * 1000; 
           console.log(`[Player] Retrying in ${backoffDelay}ms...`);
           setTimeout(() => {
               setRetryCount(prev => prev + 1);
           }, backoffDelay);
       } else {
           console.warn('[Player] Max retries reached, skipping item.');
-          setRetryCount(0);
           nextItem();
       }
   };
   
-  // Reset retry count on item change
-  useEffect(() => {
-      setRetryCount(0);
-  }, [currentItem?.id]);
+  // Video Event Handlers
+  const handleTimeUpdate = () => {
+      lastTimeUpdateRef.current = Date.now();
+      stuckCounterRef.current = 0;
+  };
+
+  const handleVideoLoad = () => {
+      setMediaLoaded(true);
+      lastTimeUpdateRef.current = Date.now();
+  };
+
+  const handleImageLoad = () => {
+      setMediaLoaded(true);
+  };
 
 
   if (!currentItem) {
@@ -180,11 +247,8 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
   }
 
   const type = getMediaType(currentItem.media.mimeType);
-  // Prefer cached URL, fallback to server URL (only if online, but we should force cache usage if possible)
   const src = mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
-
-  // Key includes retryCount to force re-mount on retry
-  const mediaKey = `${currentItem.id}-${retryCount}`;
+  const mediaKey = `${currentItem.id}-${executionId}-${retryCount}`;
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black">
@@ -194,6 +258,7 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           src={src} 
           className="w-full h-full object-fill"
           alt="Content"
+          onLoad={handleImageLoad}
           onError={handleMediaError}
         />
       ) : (
@@ -216,6 +281,8 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           crossOrigin="anonymous"
           controlsList="nodownload nofullscreen noremoteplayback"
           preload="auto"
+          onTimeUpdate={handleTimeUpdate}
+          onCanPlay={handleVideoLoad}
           onEnded={() => {
             const duration = videoRef.current?.duration;
             if (duration && isFinite(duration)) {
@@ -225,7 +292,6 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           }}
           onError={handleMediaError}
         />
-        {/* Transparent Overlay to block all browser interactions and extensions */}
         <div 
             className="absolute inset-0 z-50 w-full h-full"
             style={{ background: 'transparent', pointerEvents: 'none' }} 

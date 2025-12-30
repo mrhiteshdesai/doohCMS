@@ -73,7 +73,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 
 // Static files serving with robust path resolution
-const uploadDir = path.join(process.cwd(), 'uploads');
+const uploadDir = path.join(__dirname, '../uploads');
 console.log('Serving static files from:', uploadDir);
 
 app.use('/uploads', (req, res, next) => {
