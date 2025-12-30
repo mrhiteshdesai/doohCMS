@@ -101,7 +101,7 @@ const Login = () => {
                 <img 
                     src={branding.logoUrl} 
                     alt="Logo" 
-                    className="h-16 mx-auto mb-6 object-contain"
+                    className="h-32 mx-auto mb-8 object-contain"
                 />
             )}
             <h2 className="text-2xl font-bold text-slate-700 tracking-wider">USER LOGIN</h2>

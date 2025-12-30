@@ -224,7 +224,7 @@ const GeneralSettings: React.FC<Props> = ({ settings, onChange }) => {
                                     if (e.target.files && e.target.files.length > 0) {
                                         try {
                                             setIsUploading(true);
-                                            const url = await uploadLogo(e.target.files[0], 'login-cover.png');
+                                            const url = await uploadLogo(e.target.files[0], `login-cover-${Date.now()}.png`);
                                             const newConfig = { 
                                                 ...settings.config, 
                                                 loginPage: { 
