@@ -264,13 +264,6 @@ const Player = () => {
     memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'N/A'
   });
 
-  const getFullUrl = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('http')) return url;
-    const base = import.meta.env.VITE_API_URL || '';
-    return `${base}${url}`;
-  };
-
   // Branding Config Helpers
   const playerConfig = branding?.player || {};
   const bgColor = playerConfig.backgroundColor || '#f9fafb';

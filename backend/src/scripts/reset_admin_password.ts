@@ -5,33 +5,32 @@ import bcrypt from 'bcrypt';
 dotenv.config();
 
 async function main() {
-  const adminEmail = 'admin@example.com';
+  const adminEmail = 'admin@smartags.com';
   const newPassword = 'admin123';
 
-  console.log(`Resetting password for ${adminEmail}...`);
+  const user = await prisma.user.findUnique({
+    where: { email: adminEmail },
+  });
 
-  try {
-    const user = await prisma.user.findUnique({
-      where: { email: adminEmail },
-    });
-
-    if (!user) {
-      console.error('User not found!');
-      process.exit(1);
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { password: hashedPassword },
-    });
-
-    console.log(`Password reset successfully to: ${newPassword}`);
-  } catch (error) {
-    console.error('Error resetting password:', error);
+  if (!user) {
+    console.error(`User ${adminEmail} not found! Run bootstrap_admin.ts first.`);
     process.exit(1);
   }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { email: adminEmail },
+    data: { password: hashed },
+  });
+
+  console.log(`Password for ${adminEmail} has been reset to: ${newPassword}`);
 }
 
-main();
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
