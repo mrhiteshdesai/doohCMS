@@ -1,5 +1,8 @@
 # Proxy API requests to the backend
 /api/*  https://dooh.brandeagles.com/api/:splat  200
 
+# Proxy Uploads to the backend
+/uploads/*  https://dooh.brandeagles.com/uploads/:splat  200
+
 # SPA Fallback for React (must be last)
 /*  /index.html  200

@@ -263,6 +263,13 @@ const Player = () => {
     memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'N/A'
   });
 
+  const getFullUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    const base = import.meta.env.VITE_API_URL || '';
+    return `${base}${url}`;
+  };
+
   // Branding Config Helpers
   const playerConfig = branding?.player || {};
   const bgColor = playerConfig.backgroundColor || '#f9fafb';
@@ -984,7 +991,7 @@ const Player = () => {
                     <div className="mb-12 w-full flex justify-center">
                         <div className="flex flex-col items-center gap-6">
                             {branding?.logoUrl ? (
-                                <img src={branding.logoUrl} alt="Logo" className="h-56 w-auto object-contain" />
+                                <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-56 w-auto object-contain" />
                             ) : (
                                 <Monitor className="h-40 w-40 text-blue-600" />
                             )}
@@ -1140,7 +1147,7 @@ const Player = () => {
         <div className="mb-12 w-full flex justify-center">
             <div className="flex flex-col items-center gap-6">
                 {branding?.logoUrl ? (
-                    <img src={branding.logoUrl} alt="Logo" className="h-56 w-auto object-contain" />
+                    <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-56 w-auto object-contain" />
                 ) : (
                     <Monitor className="h-40 w-40 text-blue-600" />
                 )}
