@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlaySquare } from 'lucide-react';
+import { getFullUrl } from '../utils/url';
 
 // Define minimal types needed for the thumbnail
 interface Media {
@@ -36,12 +37,6 @@ interface PlaylistThumbnailProps {
   playlist: PlaylistData;
   className?: string;
 }
-
-const getFullUrl = (url: string) => {
-  if (url.startsWith('http')) return url;
-  const base = import.meta.env.VITE_API_URL || '';
-  return `${base}${url}`;
-};
 
 const PlaylistThumbnail: React.FC<PlaylistThumbnailProps> = ({ playlist, className = '' }) => {
   // If we have a static thumbnail URL, use it (legacy or override)

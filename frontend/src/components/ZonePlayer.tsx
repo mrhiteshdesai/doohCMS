@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getFullUrl } from '../utils/url';
 import { ZoneItem } from '../types/playlist';
 import TimeDateWidget from './widgets/TimeDateWidget';
 import AnalogClockWidget from './widgets/AnalogClockWidget';
@@ -11,11 +12,6 @@ interface ZonePlayerProps {
   zoneWidth: number;
   zoneHeight: number;
 }
-
-const getFullUrl = (url: string) => {
-  if (url.startsWith('http')) return url;
-  return `http://localhost:5000${url}`;
-};
 
 const ZonePlayer: React.FC<ZonePlayerProps> = ({ items, zoneWidth, zoneHeight }) => {
   const [currentIndex, setCurrentIndex] = useState(0);

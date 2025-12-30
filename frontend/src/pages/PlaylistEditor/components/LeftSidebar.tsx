@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Video, Grid, List, Folder, ArrowLeft, Puzzle } from 'lucide-react';
 import { MediaFile, MediaFolder } from '../../../types/playlist';
+import { getFullUrl } from '../../../utils/url';
 import api from '../../../services/api';
 import { getWidgets } from '../../../services/widget';
 import { Widget } from '../../../types/widget';
@@ -123,12 +124,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ onDragStart }) => {
     };
     e.dataTransfer.setData('application/json', JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'copy';
-  };
-
-  const getFullUrl = (url: string) => {
-    if (url.startsWith('http')) return url;
-    const base = import.meta.env.VITE_API_URL || '';
-    return `${base}${url}`;
   };
 
   const handleFolderClick = (folder: MediaFolder) => {

@@ -25,6 +25,7 @@ import {
   FileCheck,
   Tag
 } from 'lucide-react';
+import { getFullUrl } from '../utils/url';
 
 interface NavItem {
   name: string;

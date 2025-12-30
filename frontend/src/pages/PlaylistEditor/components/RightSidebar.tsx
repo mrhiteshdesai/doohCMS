@@ -4,6 +4,7 @@ import { Trash2, Move, Clock, Film, Image as ImageIcon, Puzzle } from 'lucide-re
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { getFullUrl } from '../../../utils/url';
 
 interface RightSidebarProps {
   selectedZone: Zone | null;
@@ -24,11 +25,6 @@ const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneIte
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-  };
-
-  const getFullUrl = (url: string) => {
-    if (url.startsWith('http')) return url;
-    return `http://localhost:5000${url}`;
   };
 
   const isWidget = !!item.widget && !item.media;

@@ -1,3 +1,4 @@
+import { getFullUrl } from '../utils/url';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Folder, 
@@ -721,9 +722,12 @@ const Library = () => {
                      )}
                   </div>
                   <div className="mb-2 w-full flex justify-center relative aspect-square bg-gray-100 rounded overflow-hidden items-center">
+
+// ... existing code ...
+
                     {file.mimeType.startsWith('image/') ? (
                       <img 
-                        src={`http://localhost:5000${file.url}`} 
+                        src={getFullUrl(file.url)} 
                         alt={file.name} 
                         className="w-full h-full object-cover rounded"
                         onError={(e) => {
@@ -735,7 +739,7 @@ const Library = () => {
                     ) : file.mimeType.startsWith('video/') ? (
                       <div className="w-full h-full relative bg-gray-100 rounded overflow-hidden">
                         <video 
-                          src={`http://localhost:5000${file.url}#t=0.1`} 
+                          src={`${getFullUrl(file.url)}#t=0.1`} 
                           className="w-full h-full object-cover"
                           muted
                           preload="metadata"
@@ -1171,7 +1175,7 @@ const Library = () => {
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase">URL</label>
                   <p className="text-gray-700 mt-1 text-sm break-all bg-gray-50 p-2 rounded">
-                    {`http://localhost:5000${previewItem.url}`}
+                    {getFullUrl(previewItem.url)}
                   </p>
                 </div>
               </div>
@@ -1181,7 +1185,7 @@ const Library = () => {
                   onClick={() => {
                      // Trigger download
                      const link = document.createElement('a');
-                     link.href = `http://localhost:5000${previewItem.url}`;
+                     link.href = getFullUrl(previewItem.url);
                      link.download = previewItem.name;
                      link.click();
                   }}

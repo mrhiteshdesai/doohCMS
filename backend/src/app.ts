@@ -17,6 +17,7 @@ import userRoutes from './routes/userRoutes';
 import tenantRoutes from './routes/tenantRoutes';
 import reportRoutes from './routes/reportRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
+import systemSettingsRoutes from './routes/systemSettingsRoutes';
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/tenant', tenantRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Error Handling Middleware

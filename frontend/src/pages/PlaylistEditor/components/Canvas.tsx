@@ -13,6 +13,7 @@ import {
   AlignStartVertical, AlignEndVertical, AlignStartHorizontal, AlignEndHorizontal,
   Maximize
 } from 'lucide-react';
+import { getFullUrl } from '../../../utils/url';
 import { calculateSnap, calculateResizeSnap, Guideline, Rect } from '../utils/snapHelpers';
 
 interface CanvasProps {
@@ -110,11 +111,6 @@ const Canvas: React.FC<CanvasProps> = ({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-  };
-
-  const getFullUrl = (url: string) => {
-    if (url.startsWith('http')) return url;
-    return `http://localhost:5000${url}`;
   };
 
   // Helper to get other zones in screen coordinates
@@ -507,18 +503,14 @@ const Canvas: React.FC<CanvasProps> = ({
                   firstItem.media.type === 'IMAGE' ? (
                     <img 
                       src={getFullUrl(firstItem.media.url)} 
-                      className="w-full h-full object-fill pointer-events-none" 
-                      style={{ 
-                        imageRendering: 'auto',
-                        backfaceVisibility: 'hidden',
-                        transform: 'translateZ(0)'
-                      }}
-                      alt="" 
+                      alt={firstItem.media.originalName}
+                      className="w-full h-full object-fill pointer-events-none"
                     />
                   ) : (
                     <video 
                       src={getFullUrl(firstItem.media.url)} 
-                      className="w-full h-full object-fill pointer-events-none" 
+                      className="w-full h-full object-fill pointer-events-none"
+                      muted
                     />
                   )
                 ) : firstItem && firstItem.widget ? (

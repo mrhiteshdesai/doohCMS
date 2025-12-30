@@ -7,6 +7,7 @@ import { getTenantSettings } from '../services/tenant';
 import { applyTheme } from '../utils/colors';
 import { playerCache } from '../lib/playerCache';
 import { playerSync } from '../lib/playerSync';
+import { getFullUrl } from '../utils/url';
 
 const API_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
@@ -192,7 +193,7 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
   const type = getMediaType(currentItem.media.mimeType);
   // Prefer cached URL, fallback to server URL (only if online, but we should force cache usage if possible)
   // Actually fallback is good for immediate testing if cache fails
-  const src = mediaUrls.get(currentItem.media.id) || (currentItem.media.url.startsWith('http') ? currentItem.media.url : `http://localhost:5000${currentItem.media.url}`);
+  const src = mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black">

@@ -24,7 +24,7 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
   if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
     cb(null, true);
   } else {
-    cb(new Error('Only image and video files are allowed!'));
+    cb(new Error(`Only image and video files are allowed! Received: ${file.mimetype}`));
   }
 };
 
