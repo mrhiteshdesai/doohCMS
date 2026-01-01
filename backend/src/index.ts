@@ -22,6 +22,11 @@ async function main() {
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
+    
+    // Increase timeout to 10 minutes for large uploads
+    server.timeout = 600000;
+    server.keepAliveTimeout = 600000;
+    server.headersTimeout = 601000;
 
     // Graceful shutdown
     process.on('SIGTERM', async () => {
