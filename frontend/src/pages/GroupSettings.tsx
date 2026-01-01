@@ -68,12 +68,12 @@ const GroupSettings = () => {
   const filteredScreens = availableScreens.filter(s => {
     const matchesSearch = s.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           s.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesTag = selectedTag ? (s.tags && s.tags.includes(selectedTag)) : true;
+    const matchesTag = selectedTag ? (s.tags && Array.isArray(s.tags) && s.tags.includes(selectedTag)) : true;
     const matchesLocation = selectedLocation ? (s.location?.label === selectedLocation) : true;
     return matchesSearch && matchesTag && matchesLocation;
   });
 
-  const allTags = Array.from(new Set(allScreens.flatMap(s => s.tags || [])));
+  const allTags = Array.from(new Set(allScreens.flatMap(s => (s.tags && Array.isArray(s.tags)) ? s.tags : [])));
   const allLocations = Array.from(new Set(allScreens.map(s => s.location?.label).filter(Boolean)));
 
   const handleCheckScreen = (screenId: string) => {
@@ -287,12 +287,12 @@ const GroupSettings = () => {
                                     <td className="px-4 py-3 font-medium text-gray-800">{screen.name || screen.id}</td>
                                     <td className="px-4 py-3">
                                         <div className="flex flex-wrap gap-1">
-                                            {screen.tags && screen.tags.map((tag: string) => (
-                                                <span key={tag} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
-                                                    {tag}
-                                                </span>
-                                            ))}
-                                        </div>
+                                        {Array.isArray(screen.tags) && screen.tags.map((tag: string) => (
+                                            <span key={tag} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
                                     </td>
                                     <td className="px-4 py-3 text-gray-600">{screen.location?.label || '-'}</td>
                                     <td className="px-4 py-3">

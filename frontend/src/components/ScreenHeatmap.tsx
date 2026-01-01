@@ -3,6 +3,8 @@ import { GoogleMap, useJsApiLoader, HeatmapLayerF } from '@react-google-maps/api
 import { Screen } from '../services/screen';
 import { GOOGLE_MAPS_LIBRARIES } from '../constants/maps';
 
+import { Map } from 'lucide-react';
+
 interface ScreenHeatmapProps {
   screens: Screen[];
   apiKey?: string;
@@ -21,10 +23,10 @@ const defaultCenter = {
   lng: -0.09
 };
 
-const ScreenHeatmap: React.FC<ScreenHeatmapProps> = ({ screens, apiKey, className }) => {
+const ScreenHeatmapContent: React.FC<ScreenHeatmapProps & { validApiKey: string }> = ({ screens, validApiKey, className }) => {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: apiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: validApiKey,
     libraries: GOOGLE_MAPS_LIBRARIES
   });
 
@@ -158,6 +160,24 @@ const ScreenHeatmap: React.FC<ScreenHeatmapProps> = ({ screens, apiKey, classNam
       </GoogleMap>
     </div>
   );
+};
+
+const ScreenHeatmap: React.FC<ScreenHeatmapProps> = (props) => {
+  const apiKey = props.apiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  if (!apiKey) {
+    return (
+      <div className={`bg-white rounded-xl shadow-sm border border-gray-100 flex items-center justify-center p-4 text-gray-500 ${props.className || 'h-[600px]'}`}>
+        <div className="text-center">
+          <Map className="mx-auto mb-2 opacity-50" size={32} />
+          <p className="font-medium">Map Unavailable</p>
+          <p className="text-sm">Google Maps API Key is missing.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <ScreenHeatmapContent {...props} validApiKey={apiKey} />;
 };
 
 export default ScreenHeatmap;

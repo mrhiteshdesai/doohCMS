@@ -273,7 +273,7 @@ const MapEnabledForm = ({
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: apiKey,
-    libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES,
     preventGoogleFontsLoading: true,
   });
 

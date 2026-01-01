@@ -23,10 +23,10 @@ const defaultCenter = {
   lng: -0.09
 };
 
-const ScreenMap: React.FC<ScreenMapProps> = ({ screens, onScreenClick, apiKey, className }) => {
+const ScreenMapContent: React.FC<ScreenMapProps & { validApiKey: string }> = ({ screens, onScreenClick, validApiKey, className }) => {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: apiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: validApiKey,
     libraries: GOOGLE_MAPS_LIBRARIES
   });
 
@@ -199,6 +199,24 @@ const ScreenMap: React.FC<ScreenMapProps> = ({ screens, onScreenClick, apiKey, c
       )}
     </div>
   );
+};
+
+const ScreenMap: React.FC<ScreenMapProps> = (props) => {
+  const apiKey = props.apiKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  if (!apiKey) {
+    return (
+      <div className={`bg-white rounded-xl shadow-sm border border-gray-100 flex items-center justify-center p-4 text-gray-500 ${props.className || 'h-[600px]'}`}>
+        <div className="text-center">
+          <Monitor className="mx-auto mb-2 opacity-50" size={32} />
+          <p className="font-medium">Map Unavailable</p>
+          <p className="text-sm">Google Maps API Key is missing.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <ScreenMapContent {...props} validApiKey={apiKey} />;
 };
 
 export default ScreenMap;
