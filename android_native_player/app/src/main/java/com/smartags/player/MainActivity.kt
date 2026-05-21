@@ -1,21 +1,27 @@
 package com.smartags.tvplayer
 
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
@@ -46,6 +52,8 @@ class MainActivity : AppCompatActivity() {
     private val prefsToken = "screen_token"
     private val prefsLastScreenId = "screen_id"
     private val prefsLastPairingCode = "pairing_code"
+    private val prefsStartOnBoot = "start_on_boot"
+    private val prefsKioskEnabled = "kiosk_enabled"
 
     private lateinit var playerView: PlayerView
     private lateinit var imageView: ImageView
@@ -56,6 +64,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var saveApiButton: Button
     private lateinit var pairingCodeText: TextView
     private lateinit var progress: ProgressBar
+
+    private lateinit var settingsContainer: LinearLayout
+    private lateinit var settingsDeviceOwner: TextView
+    private lateinit var settingsStartOnBoot: SwitchCompat
+    private lateinit var settingsKiosk: SwitchCompat
+    private lateinit var settingsChangeApi: Button
+    private lateinit var settingsClearCache: Button
+    private lateinit var settingsRepair: Button
+    private lateinit var settingsExit: Button
 
     private val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val http: OkHttpClient = OkHttpClient.Builder()
@@ -73,6 +90,8 @@ class MainActivity : AppCompatActivity() {
 
     private var currentPlaylistId: String? = null
     private var currentMediaId: String? = null
+    private var lastBackPressedAt: Long = 0
+    private val commandUpdates: MutableList<JSONObject> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +106,15 @@ class MainActivity : AppCompatActivity() {
         saveApiButton = findViewById(R.id.save_api_button)
         pairingCodeText = findViewById(R.id.pairing_code_text)
         progress = findViewById(R.id.progress)
+
+        settingsContainer = findViewById(R.id.settings_container)
+        settingsDeviceOwner = findViewById(R.id.settings_device_owner)
+        settingsStartOnBoot = findViewById(R.id.settings_start_on_boot)
+        settingsKiosk = findViewById(R.id.settings_kiosk)
+        settingsChangeApi = findViewById(R.id.settings_change_api)
+        settingsClearCache = findViewById(R.id.settings_clear_cache)
+        settingsRepair = findViewById(R.id.settings_repair)
+        settingsExit = findViewById(R.id.settings_exit)
 
         val prefs = getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         apiBase = prefs.getString(prefsApiBase, null)
@@ -104,6 +132,46 @@ class MainActivity : AppCompatActivity() {
             apiBase = base
             prefs.edit().putString(prefsApiBase, base).apply()
             startOrPair()
+        }
+
+        settingsDeviceOwner.text = "Device Owner: ${if (isDeviceOwner()) "YES" else "NO"}"
+
+        val startOnBootEnabled = prefs.getBoolean(prefsStartOnBoot, true)
+        settingsStartOnBoot.isChecked = startOnBootEnabled
+        setBootReceiverEnabled(startOnBootEnabled)
+
+        val kioskEnabled = prefs.getBoolean(prefsKioskEnabled, false)
+        settingsKiosk.isChecked = kioskEnabled
+        applyKioskMode(kioskEnabled)
+
+        settingsStartOnBoot.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(prefsStartOnBoot, isChecked).apply()
+            setBootReceiverEnabled(isChecked)
+        }
+
+        settingsKiosk.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(prefsKioskEnabled, isChecked).apply()
+            applyKioskMode(isChecked)
+        }
+
+        settingsChangeApi.setOnClickListener {
+            settingsContainer.visibility = View.GONE
+            showOverlay("Enter API base URL to continue", showPairing = true)
+        }
+
+        settingsClearCache.setOnClickListener {
+            clearLocalMedia()
+            Toast.makeText(this, "Offline cache cleared", Toast.LENGTH_SHORT).show()
+        }
+
+        settingsRepair.setOnClickListener {
+            settingsContainer.visibility = View.GONE
+            rePair()
+        }
+
+        settingsExit.setOnClickListener {
+            applyKioskMode(false)
+            finish()
         }
 
         player = ExoPlayer.Builder(this).build()
@@ -129,6 +197,41 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        hideSystemUI()
+    }
+
+    override fun onBackPressed() {
+        if (settingsContainer.visibility == View.VISIBLE) {
+            settingsContainer.visibility = View.GONE
+            hideSystemUI()
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastBackPressedAt <= 450) {
+            toggleSettings()
+            lastBackPressedAt = 0
+            return
+        }
+        lastBackPressedAt = now
+        Toast.makeText(this, "Press back again for menu", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_F1) {
+            toggleSettings()
+            return true
+        }
+        if (event != null && event.isCtrlPressed && keyCode == KeyEvent.KEYCODE_M) {
+            toggleSettings()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun toggleSettings() {
+        settingsDeviceOwner.text = "Device Owner: ${if (isDeviceOwner()) "YES" else "NO"}"
+        settingsContainer.visibility = if (settingsContainer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         hideSystemUI()
     }
 
@@ -340,8 +443,20 @@ class MainActivity : AppCompatActivity() {
                     payload.put("deviceId", Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
                     payload.put("currentPlaylistId", currentPlaylistId ?: JSONObject.NULL)
                     payload.put("currentMediaId", currentMediaId ?: JSONObject.NULL)
+                    payload.put("kioskEnabled", getSharedPreferences(prefsName, Context.MODE_PRIVATE).getBoolean(prefsKioskEnabled, false))
+                    payload.put("startOnBoot", getSharedPreferences(prefsName, Context.MODE_PRIVATE).getBoolean(prefsStartOnBoot, true))
+
+                    val updates = synchronized(commandUpdates) {
+                        if (commandUpdates.isEmpty()) null else JSONArray(commandUpdates.toList())
+                    }
+                    if (updates != null) {
+                        payload.put("commandUpdates", updates)
+                    }
 
                     val res = httpPostJson("$base/player/heartbeat", payload, authToken = auth)
+                    if (res != null && updates != null) {
+                        synchronized(commandUpdates) { commandUpdates.clear() }
+                    }
                     val commands = res?.optJSONArray("commands")
                     if (commands != null) {
                         handleCommands(commands)
@@ -355,16 +470,54 @@ class MainActivity : AppCompatActivity() {
     private fun handleCommands(commands: JSONArray) {
         for (i in 0 until commands.length()) {
             val cmd = commands.optJSONObject(i) ?: continue
+            val id = cmd.optString("id", "")
+            val type = cmd.optString("type")
+            val payload = cmd.optJSONObject("payload")
+
+            if (id.isNotBlank()) {
+                queueCommandUpdate(id, "PROCESSING", "Starting $type")
+            }
+
             when (cmd.optString("type")) {
-                "RELOAD" -> appScope.launch { fetchAndPlay() }
+                "RELOAD" -> appScope.launch {
+                    fetchAndPlay()
+                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "Reloaded")
+                }
                 "CLEAR_CACHE" -> appScope.launch {
                     clearLocalMedia()
                     fetchAndPlay()
+                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "Cache cleared")
                 }
                 "REBOOT" -> {
                     mainHandler.post {
                         finish()
                         startActivity(intent)
+                    }
+                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "App restarted")
+                }
+                "SET_KIOSK" -> {
+                    val enabled = payload?.optBoolean("enabled", false) ?: false
+                    getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().putBoolean(prefsKioskEnabled, enabled).apply()
+                    settingsKiosk.isChecked = enabled
+                    applyKioskMode(enabled)
+                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "Kiosk set to $enabled")
+                }
+                "SET_START_ON_BOOT" -> {
+                    val enabled = payload?.optBoolean("enabled", true) ?: true
+                    getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().putBoolean(prefsStartOnBoot, enabled).apply()
+                    settingsStartOnBoot.isChecked = enabled
+                    setBootReceiverEnabled(enabled)
+                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "Start on boot set to $enabled")
+                }
+                "SET_API_BASE" -> {
+                    val newBase = normalizeApiBase(payload?.optString("apiBase", null))
+                    if (!newBase.isNullOrBlank()) {
+                        getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().putString(prefsApiBase, newBase).apply()
+                        apiBase = newBase
+                        if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "API base updated")
+                        appScope.launch { rePair() }
+                    } else {
+                        if (id.isNotBlank()) queueCommandUpdate(id, "FAILED", "Invalid apiBase")
                     }
                 }
             }
@@ -391,7 +544,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun parseMedia(mediaJson: JSONObject): MediaFile? {
         val id = mediaJson.optString("id", "")
-        val url = mediaJson.optString("url", "")
+        val url = absoluteMediaUrl(mediaJson.optString("url", ""))
         val mime = mediaJson.optString("mimeType", "")
         val filename = mediaJson.optString("filename", id)
         if (id.isBlank() || url.isBlank() || mime.isBlank()) return null
@@ -440,7 +593,77 @@ class MainActivity : AppCompatActivity() {
     private fun clearLocalMedia() {
         val dir = File(filesDir, "media")
         if (!dir.exists()) return
-        dir.listFiles()?.forEach { it.delete() }
+        dir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    private fun absoluteMediaUrl(rawUrl: String): String {
+        val url = rawUrl.trim()
+        if (url.isBlank()) return ""
+        if (url.startsWith("http://", true) || url.startsWith("https://", true)) return url
+
+        val base = apiBase?.removeSuffix("/api") ?: return url
+        return if (url.startsWith("/")) "$base$url" else "$base/$url"
+    }
+
+    private fun rePair() {
+        val prefs = getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove(prefsToken)
+            .remove(prefsLastPairingCode)
+            .remove(prefsLastScreenId)
+            .apply()
+        token = null
+        currentPlaylistId = null
+        currentMediaId = null
+        playbackJob?.cancel()
+        player.stop()
+        appScope.launch { pairDevice() }
+    }
+
+    private fun queueCommandUpdate(id: String, status: String, message: String) {
+        synchronized(commandUpdates) {
+            val obj = JSONObject()
+            obj.put("id", id)
+            obj.put("status", status)
+            obj.put("message", message)
+            commandUpdates.add(obj)
+        }
+    }
+
+    private fun isDeviceOwner(): Boolean {
+        val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        return dpm.isDeviceOwnerApp(packageName)
+    }
+
+    private fun setBootReceiverEnabled(enabled: Boolean) {
+        val component = ComponentName(this, BootReceiver::class.java)
+        val state = if (enabled) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
+        packageManager.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
+    }
+
+    private fun applyKioskMode(enabled: Boolean) {
+        if (enabled) {
+            try {
+                val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                val admin = ComponentName(this, SmartagsDeviceAdminReceiver::class.java)
+                if (dpm.isDeviceOwnerApp(packageName)) {
+                    dpm.setLockTaskPackages(admin, arrayOf(packageName))
+                }
+                startLockTask()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Kiosk requires screen pinning or device owner", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            try {
+                stopLockTask()
+            } catch (_: Exception) {
+            }
+        }
+        hideSystemUI()
     }
 
     private fun normalizeApiBase(raw: String?): String? {
