@@ -10,6 +10,9 @@ coverage/
 *.sqlite
 *.db
 android/local.properties
+android_native_player/local.properties
+android_native_player/.gradle/
+android_native_player/**/build/
 
 # Backend specific
 backend/node_modules/
