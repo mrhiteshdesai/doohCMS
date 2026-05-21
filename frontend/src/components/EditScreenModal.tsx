@@ -103,6 +103,7 @@ const EditScreenFormUI = ({
                     options={[
                       { value: "Browser", label: "Browser" },
                       { value: "Android App", label: "Android App" },
+                      { value: "Android TV (Native)", label: "Android TV (Native)" },
                       { value: "WebOS APP", label: "WebOS APP" },
                       { value: "Tizen App", label: "Tizen App" }
                     ]}

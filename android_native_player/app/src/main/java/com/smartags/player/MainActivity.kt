@@ -4,6 +4,8 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -198,6 +200,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         hideSystemUI()
+        applyKioskMode(getSharedPreferences(prefsName, Context.MODE_PRIVATE).getBoolean(prefsKioskEnabled, false))
     }
 
     override fun onBackPressed() {
@@ -441,6 +444,7 @@ class MainActivity : AppCompatActivity() {
                     payload.put("androidVersion", Build.VERSION.RELEASE ?: "")
                     payload.put("device", Build.MODEL ?: "")
                     payload.put("deviceId", Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
+                    payload.put("deviceOwner", isDeviceOwner())
                     payload.put("currentPlaylistId", currentPlaylistId ?: JSONObject.NULL)
                     payload.put("currentMediaId", currentMediaId ?: JSONObject.NULL)
                     payload.put("kioskEnabled", getSharedPreferences(prefsName, Context.MODE_PRIVATE).getBoolean(prefsKioskEnabled, false))
@@ -646,12 +650,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyKioskMode(enabled: Boolean) {
+        val prefs = getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(prefsKioskEnabled, enabled).apply()
+
         if (enabled) {
             try {
                 val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
                 val admin = ComponentName(this, SmartagsDeviceAdminReceiver::class.java)
                 if (dpm.isDeviceOwnerApp(packageName)) {
                     dpm.setLockTaskPackages(admin, arrayOf(packageName))
+                    setAsHomeLauncher(dpm, admin, true)
+                    setKioskLauncherEnabled(true)
                 }
                 startLockTask()
             } catch (_: Exception) {
@@ -662,8 +671,41 @@ class MainActivity : AppCompatActivity() {
                 stopLockTask()
             } catch (_: Exception) {
             }
+
+            runCatching {
+                val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                val admin = ComponentName(this, SmartagsDeviceAdminReceiver::class.java)
+                if (dpm.isDeviceOwnerApp(packageName)) {
+                    setAsHomeLauncher(dpm, admin, false)
+                    setKioskLauncherEnabled(false)
+                    dpm.setLockTaskPackages(admin, emptyArray())
+                }
+            }
         }
         hideSystemUI()
+    }
+
+    private fun setKioskLauncherEnabled(enabled: Boolean) {
+        val component = ComponentName(this, "${packageName}.KioskLauncher")
+        val state = if (enabled) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
+        packageManager.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
+    }
+
+    private fun setAsHomeLauncher(dpm: DevicePolicyManager, admin: ComponentName, enabled: Boolean) {
+        if (enabled) {
+            val filter = IntentFilter(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+            }
+            val activity = ComponentName(this, "${packageName}.KioskLauncher")
+            dpm.addPersistentPreferredActivity(admin, filter, activity)
+        } else {
+            dpm.clearPackagePersistentPreferredActivities(packageName)
+        }
     }
 
     private fun normalizeApiBase(raw: String?): String? {

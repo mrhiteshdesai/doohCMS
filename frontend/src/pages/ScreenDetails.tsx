@@ -7,7 +7,7 @@ import PermissionGuard from '../components/PermissionGuard';
 import { 
   Monitor, Activity, Terminal, Camera, RefreshCw, Power, ArrowLeft, 
   Clock, Save, FileText, Database, PlaySquare, Settings, Download, 
-  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2, X
+  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2, X, Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFullUrl } from '../utils/url';
@@ -22,6 +22,11 @@ const ScreenDetails = () => {
   const [browserSettings, setBrowserSettings] = useState<any>({});
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
+  const [androidRemote, setAndroidRemote] = useState<any>({
+    apiBase: '',
+    kioskEnabled: false,
+    startOnBoot: true
+  });
 
   const fetchScreen = async () => {
     try {
@@ -30,6 +35,13 @@ const ScreenDetails = () => {
       if (res.data.config?.browserSettings) {
         setBrowserSettings(res.data.config.browserSettings);
       }
+      const telemetry = res.data.config?.telemetry || {};
+      setAndroidRemote((prev: any) => ({
+        ...prev,
+        apiBase: telemetry.apiBase || prev.apiBase || '',
+        kioskEnabled: telemetry.kioskEnabled !== undefined ? !!telemetry.kioskEnabled : prev.kioskEnabled,
+        startOnBoot: telemetry.startOnBoot !== undefined ? !!telemetry.startOnBoot : prev.startOnBoot
+      }));
     } catch (error) {
       console.error('Failed to fetch screen details:', error);
       toast.error('Failed to load screen details');
@@ -153,12 +165,36 @@ const ScreenDetails = () => {
     }
   };
 
+  const sendAndroidCommand = async (command: string, payload?: any) => {
+    setCommandLoading(true);
+    try {
+      await api.post(`/screens/${id}/command`, { command, payload });
+      toast.success(`Command '${command}' sent successfully`);
+      fetchScreen();
+    } catch (error) {
+      console.error('Failed to send command:', error);
+      toast.error('Failed to send command');
+    } finally {
+      setCommandLoading(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center">Loading...</div>;
   if (!screen) return <div className="p-8 text-center">Screen not found</div>;
 
   const telemetry = screen.config?.telemetry || {};
   const pendingCommands = screen.config?.pendingCommands || [];
   const displayQueue = screen.config?.commandHistory || [];
+  
+  // Phase 3: Telemetry Data
+  const deviceHealth = {
+    cpuTemp: screen.cpuTemp ? `${screen.cpuTemp.toFixed(1)}°C` : 'N/A',
+    freeDisk: screen.freeDiskSpace ? `${(Number(screen.freeDiskSpace) / 1024 / 1024 / 1024).toFixed(2)} GB` : 'N/A',
+    totalDisk: screen.totalDiskSpace ? `${(Number(screen.totalDiskSpace) / 1024 / 1024 / 1024).toFixed(2)} GB` : 'N/A',
+    memory: screen.usedMemory && screen.totalMemory ? `${(Number(screen.usedMemory) / 1024 / 1024).toFixed(0)} / ${(Number(screen.totalMemory) / 1024 / 1024).toFixed(0)} MB` : 'N/A',
+    version: screen.appVersion || 'Unknown',
+    lastUpdate: screen.lastTelemetryAt ? new Date(screen.lastTelemetryAt).toLocaleString() : 'Never'
+  };
 
   return (
     <div className="space-y-6">
@@ -183,6 +219,46 @@ const ScreenDetails = () => {
           </div>
         </div>
         <div className="flex space-x-2">
+            {/* Remote Commands Dropdown or Buttons */}
+            <div className="flex gap-2">
+                <button 
+                    onClick={() => handleCommand('REBOOT')}
+                    disabled={commandLoading}
+                    className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
+                    title="Reboot Device"
+                >
+                    <Power size={18} className="mr-1" />
+                    Reboot
+                </button>
+                <button 
+                    onClick={() => handleCommand('RELOAD')}
+                    disabled={commandLoading}
+                    className="flex items-center px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+                    title="Reload Content"
+                >
+                    <RefreshCw size={18} className="mr-1" />
+                    Reload
+                </button>
+                <button 
+                    onClick={() => handleCommand('SNAPSHOT')}
+                    disabled={commandLoading}
+                    className="flex items-center px-3 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 disabled:opacity-50"
+                    title="Request Snapshot"
+                >
+                    <Camera size={18} className="mr-1" />
+                    Snapshot
+                </button>
+                 <button 
+                    onClick={() => handleCommand('CLEAR_CACHE')}
+                    disabled={commandLoading}
+                    className="flex items-center px-3 py-2 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 disabled:opacity-50"
+                    title="Clear Cache"
+                >
+                    <Trash2 size={18} className="mr-1" />
+                    Clear Cache
+                </button>
+            </div>
+
           <button 
             onClick={fetchScreen}
             className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
@@ -282,8 +358,15 @@ const ScreenDetails = () => {
                  icon={Smartphone} 
                  label="Operating System" 
                  value={telemetry.os || 'Linux'} 
-                 subValue={telemetry.appVersion || 'Unknown Version'}
+                 subValue="Platform"
                  color="text-purple-600 bg-purple-50"
+               />
+               <StatCard 
+                 icon={Info} 
+                 label="App Version" 
+                 value={screen.appVersion || telemetry.appVersion || 'Unknown'} 
+                 subValue="Player Version"
+                 color="text-cyan-600 bg-cyan-50"
                />
                <StatCard 
                  icon={RotateCw} 
@@ -302,8 +385,8 @@ const ScreenDetails = () => {
                <StatCard 
                  icon={HardDrive} 
                  label="Storage" 
-                 value={telemetry.diskFree ? `${telemetry.diskFree} GB Free` : 'Unknown'} 
-                 subValue={telemetry.diskTotal ? `of ${telemetry.diskTotal} GB` : 'Free Space'}
+                 value={deviceHealth.freeDisk} 
+                 subValue={`Total: ${deviceHealth.totalDisk}`}
                  color="text-indigo-600 bg-indigo-50"
                />
                <StatCard 
@@ -316,8 +399,8 @@ const ScreenDetails = () => {
                <StatCard 
                  icon={Activity} 
                  label="Memory" 
-                 value={telemetry.memoryUsage ? `${telemetry.memoryUsage}%` : 'N/A'} 
-                 subValue="Used"
+                 value={deviceHealth.memory} 
+                 subValue={telemetry.memoryUsage ? `${telemetry.memoryUsage}% Used` : 'Usage'}
                  color="text-pink-600 bg-pink-50"
                />
                <StatCard 
@@ -457,6 +540,45 @@ const ScreenDetails = () => {
         )}
 
 
+
+        {activeTab === 'health' && (
+            <div className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-sm font-medium text-gray-500">CPU Temperature</h3>
+                            <Thermometer className="text-orange-500" size={20} />
+                        </div>
+                        <p className="text-2xl font-bold text-gray-900">{deviceHealth.cpuTemp}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-sm font-medium text-gray-500">Free Disk Space</h3>
+                            <HardDrive className="text-blue-500" size={20} />
+                        </div>
+                        <p className="text-2xl font-bold text-gray-900">{deviceHealth.freeDisk}</p>
+                        <p className="text-xs text-gray-500 mt-1">Total: {deviceHealth.totalDisk}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-sm font-medium text-gray-500">Memory Usage</h3>
+                            <Activity className="text-purple-500" size={20} />
+                        </div>
+                        <p className="text-2xl font-bold text-gray-900">{deviceHealth.memory}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                         <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-sm font-medium text-gray-500">App Version</h3>
+                            <Info className="text-gray-500" size={20} />
+                        </div>
+                        <p className="text-lg font-bold text-gray-900">{deviceHealth.version}</p>
+                         <p className="text-xs text-gray-500 mt-1">Last Update: {deviceHealth.lastUpdate}</p>
+                    </div>
+                </div>
+
+                 {/* Command History specific to Health/Maintenance could go here */}
+            </div>
+        )}
 
         {/* Screen Settings */}
         {activeTab === 'settings' && (
@@ -625,9 +747,75 @@ const ScreenDetails = () => {
                     </div>
                 </div>
              ) : (
-                <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200 border-dashed">
-                    <Settings size={32} className="mx-auto text-gray-400 mb-2" />
-                    <p className="text-gray-500">Remote settings are currently only available for Browser players.</p>
+                <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <Smartphone className="mr-2" size={20} /> Android Player Controls
+                        </h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Start on Boot</label>
+                                <select
+                                    className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    value={androidRemote.startOnBoot ? 'true' : 'false'}
+                                    onChange={(e) => {
+                                        const enabled = e.target.value === 'true';
+                                        setAndroidRemote((prev: any) => ({ ...prev, startOnBoot: enabled }));
+                                        sendAndroidCommand('SET_START_ON_BOOT', { enabled });
+                                    }}
+                                    disabled={commandLoading}
+                                >
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Kiosk Mode</label>
+                                <select
+                                    className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    value={androidRemote.kioskEnabled ? 'true' : 'false'}
+                                    onChange={(e) => {
+                                        const enabled = e.target.value === 'true';
+                                        setAndroidRemote((prev: any) => ({ ...prev, kioskEnabled: enabled }));
+                                        sendAndroidCommand('SET_KIOSK', { enabled });
+                                    }}
+                                    disabled={commandLoading}
+                                >
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">API Base URL</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={androidRemote.apiBase || ''}
+                                        onChange={(e) => setAndroidRemote((prev: any) => ({ ...prev, apiBase: e.target.value }))}
+                                        placeholder="https://dooh.brandeagles.com/api"
+                                        className="flex-1 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                    <button
+                                        onClick={() => sendAndroidCommand('SET_API_BASE', { apiBase: androidRemote.apiBase })}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                                        disabled={commandLoading || !androidRemote.apiBase}
+                                    >
+                                        Apply
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 text-sm text-gray-600">
+                            <div>Device Owner: {telemetry.deviceOwner ? 'Yes' : 'No/Unknown'}</div>
+                            <div>Platform: {telemetry.platform || screen.playerType}</div>
+                            <div>Android: {telemetry.androidVersion || 'Unknown'}</div>
+                            <div>Device: {telemetry.device || 'Unknown'}</div>
+                        </div>
+                    </div>
                 </div>
              )}
           </div>
