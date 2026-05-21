@@ -9,6 +9,16 @@ import { playerCache } from '../lib/playerCache';
 import { playerSync } from '../lib/playerSync';
 import { getFullUrl } from '../utils/url';
 
+declare global {
+    interface Window {
+        Android?: {
+            getDeviceId: () => string;
+            showToast: (msg: string) => void;
+            getAppVersion: () => string;
+        }
+    }
+}
+
 const API_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : '/api';
@@ -233,6 +243,33 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
       setMediaLoaded(true);
   };
 
+  const restartCurrentVideo = () => {
+      const video = videoRef.current;
+      if (!video) {
+          nextItem();
+          return;
+      }
+
+      try {
+          const duration = video.duration;
+          if (duration && isFinite(duration)) {
+              logPoP(Date.now() - (duration * 1000), duration);
+          }
+
+          video.currentTime = 0;
+          const playPromise = video.play();
+          if (playPromise && typeof playPromise.catch === 'function') {
+              playPromise.catch((e) => {
+                  console.error('[Player] Failed to restart single video seamlessly', e);
+                  nextItem();
+              });
+          }
+      } catch (e) {
+          console.error('[Player] Error restarting single video', e);
+          nextItem();
+      }
+  };
+
 
   if (!currentItem) {
     return <div className="w-full h-full bg-black" />;
@@ -249,6 +286,7 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
   const type = getMediaType(currentItem.media.mimeType);
   const src = mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
   const mediaKey = `${currentItem.id}-${executionId}-${retryCount}`;
+  const isSingleVideoLoop = type === 'VIDEO' && sortedItems.length === 1;
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black">
@@ -284,6 +322,11 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
           onTimeUpdate={handleTimeUpdate}
           onCanPlay={handleVideoLoad}
           onEnded={() => {
+            if (isSingleVideoLoop) {
+                restartCurrentVideo();
+                return;
+            }
+
             const duration = videoRef.current?.duration;
             if (duration && isFinite(duration)) {
                 logPoP(Date.now() - (duration * 1000), duration);
@@ -593,6 +636,9 @@ const Player = () => {
 
   const registerDevice = async () => {
     try {
+      if (window.Android) {
+          console.log('[Player] Android Device ID:', window.Android.getDeviceId());
+      }
       const res = await axios.post(`${API_URL}/player/register`);
       const { code } = res.data;
       localStorage.setItem('pairingCode', code);
@@ -653,6 +699,7 @@ const Player = () => {
   const resetPlayer = () => {
     localStorage.removeItem('screenToken');
     localStorage.removeItem('pairingCode');
+    localStorage.removeItem('lastPlaylistId');
     window.location.reload();
   };
 
@@ -872,6 +919,43 @@ const Player = () => {
                 } catch (err) {
                     console.warn('Failed to get cached files count', err);
                 }
+
+                // Add System Health Telemetry (Disk, Memory, etc.)
+                try {
+                    // Disk Space
+                    if (navigator.storage && navigator.storage.estimate) {
+                        const estimate = await navigator.storage.estimate();
+                        if (estimate.quota && estimate.usage) {
+                            telemetry.totalDiskSpace = estimate.quota;
+                            telemetry.freeDiskSpace = estimate.quota - estimate.usage;
+                        }
+                    }
+
+                    // Memory (Chrome/Electron only)
+                    if ((performance as any).memory) {
+                         const mem = (performance as any).memory;
+                         telemetry.usedMemory = mem.usedJSHeapSize;
+                         telemetry.totalMemory = mem.jsHeapSizeLimit;
+                    }
+
+                    // CPU Temp (Native Only)
+                    if (window.Android && (window.Android as any).getCpuTemp) {
+                         telemetry.cpuTemp = (window.Android as any).getCpuTemp();
+                    } else {
+                         // Mock for testing if needed, or leave null
+                         // telemetry.cpuTemp = 45.5; 
+                    }
+
+                    // App Version
+                    if (window.Android && window.Android.getAppVersion) {
+                        telemetry.appVersion = window.Android.getAppVersion();
+                    } else {
+                        telemetry.appVersion = 'Web Player v1.0';
+                    }
+
+                } catch (e) {
+                    console.warn('[Player] Failed to gather telemetry', e);
+                }
             }
 
             if (downloadProgressRef.current !== null) {
@@ -999,6 +1083,15 @@ const Player = () => {
           }));
       }
 
+      // Check Jitter Delay (Anti-Thundering Herd)
+      const downloadJitter = newContent.config?.traffic?.downloadJitter || 0; // seconds
+      if (downloadJitter > 0 && !isUpdatingRef.current) {
+         // Check if we are already "jittering"
+         // For simplicity, we can just randomly delay here before proceeding
+         // But we need to make sure we don't delay on EVERY poll
+         // We only delay if we detect a CHANGE that requires download
+      }
+
       if (!newContent.playlist) {
           // No playlist assigned
           if (currentPlaylistRef.current) setCurrentPlaylist(null);
@@ -1006,13 +1099,31 @@ const Player = () => {
       }
 
       // Check if playlist changed or version changed
-      // If we already have the playlist loaded in memory (currentPlaylistRef), we skip
-      // If it's a refresh, currentPlaylistRef is null initially, so we enter here.
-      // BUT we should check if we already have the media in cache to avoid re-downloading/reporting.
-      
       const isNewPlaylist = !currentPlaylistRef.current || currentPlaylistRef.current.id !== newContent.playlist.id;
       
       if (isNewPlaylist) {
+          console.log(`New playlist detected: ${newContent.playlist.id}`);
+
+          const storedPlaylistId = localStorage.getItem('lastPlaylistId');
+          const isRestoring = storedPlaylistId === newContent.playlist.id;
+
+          // Apply Jitter if configured (AND NOT restoring from cache)
+          if (downloadJitter > 0 && !isRestoring) {
+             const delayMs = Math.floor(Math.random() * downloadJitter * 1000);
+             console.log(`[Traffic] Applying jitter delay of ${delayMs}ms before downloading...`);
+             
+             // Show waiting status (optional, maybe in debug overlay)
+             setDownloadProgress(0); // Show 0% to indicate "Waiting"
+             downloadProgressRef.current = 0;
+
+             isUpdatingRef.current = true; // Lock immediately
+             
+             await new Promise(resolve => setTimeout(resolve, delayMs));
+             console.log('[Traffic] Jitter delay finished. Starting download.');
+          } else if (isRestoring) {
+             console.log('[Player] Restoring cached playlist (skipping jitter)');
+          }
+
           console.log('Loading playlist content...');
           isUpdatingRef.current = true;
           
@@ -1052,6 +1163,7 @@ const Player = () => {
             await loadUrls();
             setMediaUrls(urls);
             setCurrentPlaylist(newContent.playlist);
+            localStorage.setItem('lastPlaylistId', newContent.playlist.id);
             setDownloadProgress(null);
             downloadProgressRef.current = null;
             console.log('Playlist updated and playing.');
@@ -1096,21 +1208,21 @@ const Player = () => {
   if (status === 'PAIRED') {
     if (!currentPlaylist) {
         return (
-            <div id="player-container" className="flex h-screen w-screen bg-white overflow-hidden">
+            <div id="player-container" className="flex flex-col lg:flex-row h-screen w-screen bg-white overflow-hidden">
                 {/* Left Side - Info & Status */}
                 <div 
-                    className="w-1/2 h-full flex flex-col justify-center items-center p-12 relative shadow-2xl z-10"
+                    className="w-full lg:w-1/2 h-full flex flex-col items-center p-6 md:p-12 shadow-2xl z-10"
                     style={{ backgroundColor: bgColor }}
                 >
                     {/* Logo */}
-                    <div className="mb-12 w-full flex justify-center">
+                    <div className="mb-6 md:mb-12 w-full flex justify-center">
                         <div className="flex flex-col items-center gap-6">
                             {branding?.logoUrl ? (
-                                <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-56 w-auto object-contain" />
+                                <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-28 md:h-56 w-auto object-contain" />
                             ) : (
-                                <Monitor className="h-40 w-40 text-blue-600" />
+                                <Monitor className="h-24 w-24 md:h-40 md:w-40 text-blue-600" />
                             )}
-                            <span className="text-3xl font-bold tracking-tight text-gray-900 text-center">
+                            <span className="text-xl md:text-3xl font-bold tracking-tight text-gray-900 text-center">
                                 {branding?.name || 'CMS Player'}
                             </span>
                         </div>
@@ -1118,7 +1230,7 @@ const Player = () => {
 
                     {/* Status Block */}
                     <div 
-                        className="p-8 rounded-2xl shadow-xl text-center w-full max-w-md"
+                        className="p-6 md:p-8 rounded-2xl shadow-xl text-center w-full max-w-md"
                         style={{ 
                             backgroundColor: codeBlockBg,
                             borderColor: codeBlockBorder,
@@ -1156,7 +1268,7 @@ const Player = () => {
 
                     {/* System Info Footer */}
                     <div 
-                        className="absolute bottom-0 left-0 w-full border-t border-gray-200 p-6"
+                        className="mt-auto w-full border-t border-gray-200 p-6"
                         style={{ 
                             backgroundColor: sysInfoBg,
                             color: sysInfoText
@@ -1187,7 +1299,7 @@ const Player = () => {
                 </div>
 
                 {/* Right Side - Visual Placeholder */}
-                <div className="w-1/2 h-full bg-blue-600 relative overflow-hidden flex items-center justify-center">
+                <div className="hidden lg:flex w-1/2 h-full bg-blue-600 relative overflow-hidden items-center justify-center">
                      <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-900 opacity-90 z-10"></div>
                      <img 
                         src="https://images.unsplash.com/photo-1542751371-adc38448a05e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80" 
@@ -1252,22 +1364,22 @@ const Player = () => {
 
   // Unpaired Screen Layout
   return (
-    <div id="player-container" className="flex h-screen w-screen bg-white overflow-hidden">
+    <div id="player-container" className="flex flex-col lg:flex-row h-screen w-screen bg-white overflow-hidden">
       {/* Left Side - Info & Pairing */}
       <div 
-        className="w-1/2 h-full flex flex-col justify-center items-center p-12 relative shadow-2xl z-10"
+        className="w-full lg:w-1/2 h-full flex flex-col items-center p-6 md:p-12 shadow-2xl z-10"
         style={{ backgroundColor: bgColor }}
       >
         
         {/* Logo */}
-        <div className="mb-12 w-full flex justify-center">
+        <div className="mb-6 md:mb-12 w-full flex justify-center">
             <div className="flex flex-col items-center gap-6">
                 {branding?.logoUrl ? (
-                    <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-56 w-auto object-contain" />
+                    <img src={getFullUrl(branding.logoUrl)} alt="Logo" className="h-28 md:h-56 w-auto object-contain" />
                 ) : (
-                    <Monitor className="h-40 w-40 text-blue-600" />
+                    <Monitor className="h-24 w-24 md:h-40 md:w-40 text-blue-600" />
                 )}
-                <span className="text-3xl font-bold tracking-tight text-gray-900 text-center">
+                <span className="text-xl md:text-3xl font-bold tracking-tight text-gray-900 text-center">
                     {branding?.name || 'CMS Player'}
                 </span>
             </div>
@@ -1291,7 +1403,7 @@ const Player = () => {
         </div>
 
         {/* Instructions */}
-        <div className="mt-12 text-center max-w-md">
+        <div className="mt-8 md:mt-12 text-center max-w-md">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">How to Pair</h3>
             <p className="text-gray-600 leading-relaxed">
                 Log in to your CMS dashboard, navigate to <span className="font-medium text-blue-600">Screens</span>, 
@@ -1301,7 +1413,7 @@ const Player = () => {
 
         {/* System Info Footer */}
         <div 
-            className="absolute bottom-0 left-0 w-full border-t border-gray-200 p-6"
+            className="mt-auto w-full border-t border-gray-200 p-6"
             style={{ 
                 backgroundColor: sysInfoBg,
                 color: sysInfoText
@@ -1332,7 +1444,7 @@ const Player = () => {
       </div>
 
       {/* Right Side - Visual Placeholder */}
-      <div className="w-1/2 h-full bg-blue-600 relative overflow-hidden flex items-center justify-center">
+      <div className="hidden lg:flex w-1/2 h-full bg-blue-600 relative overflow-hidden items-center justify-center">
          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-indigo-900 opacity-90 z-10"></div>
          {/* Placeholder Image Pattern */}
          <img 
