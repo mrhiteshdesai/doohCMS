@@ -361,7 +361,7 @@ const AddScheduleModal = ({ onClose, onCreated, onUpdated, initial }: { onClose:
       endTime: computedEndTime,
       recurrence,
       daysOfWeek: recurrence === 'SPECIFIC_DAYS' ? daysOfWeek : undefined,
-      timezone: localStorage.getItem('timezone') || undefined,
+      timezone: localStorage.getItem('timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
     if (targetType === 'SCREEN') payload.screenId = screenId;
     else payload.groupId = groupId;

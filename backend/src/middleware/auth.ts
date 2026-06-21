@@ -1,12 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
 import prisma from '../prisma';
+import { appMetrics } from '../observability/metrics';
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
   // Ensure authHeader is a string and starts with Bearer
   if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    appMetrics.recordAuthFailure();
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
@@ -14,6 +16,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   try {
     const decoded = verifyToken(token) as any;
     if (!decoded) {
+        appMetrics.recordAuthFailure();
         return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
@@ -21,14 +24,21 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     if (decoded.type === 'screen') {
         const screen = await prisma.screen.findUnique({
             where: { id: decoded.id },
-            select: { id: true, tenantId: true }
+            select: { id: true, tenantId: true, isDeleted: true, status: true }
         });
 
-        if (!screen) {
+        if (!screen || screen.isDeleted || screen.status === 'DELETED') {
+             appMetrics.recordAuthFailure();
              return res.status(401).json({ message: 'Screen not found' });
         }
         
-        req.user = decoded;
+        req.user = {
+          id: decoded.id,
+          email: '',
+          tenantId: screen.tenantId || '',
+          roles: [],
+          permissions: []
+        };
         return next();
     }
 
@@ -39,12 +49,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (!user || !user.isActive) {
+      appMetrics.recordAuthFailure();
       return res.status(401).json({ message: 'User is inactive or no longer exists' });
     }
 
     req.user = decoded;
     next();
   } catch (error) {
+    appMetrics.recordAuthFailure();
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
 };

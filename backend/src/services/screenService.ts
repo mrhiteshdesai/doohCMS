@@ -2,8 +2,71 @@ import { PrismaClient } from '@prisma/client';
 import { generatePairingCode } from '../utils/codeGenerator';
 import { generateToken } from '../utils/jwt';
 import prisma from '../prisma';
+import * as systemSettingsService from './systemSettingsService';
+import { appMetrics } from '../observability/metrics';
+import {
+  buildNativeDiagnostics,
+  buildNativePlaybackManifest,
+  normalizeHeartbeatTelemetry,
+  normalizeNativeCommand
+} from './nativeFleetService';
 
-// use shared prisma client
+// Helper to resolve active schedule (Phase 2.2)
+const resolveActiveSchedule = async (screenId: string, tenantId: string) => {
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM
+    const currentDay = now.getDay().toString(); // 0-6
+    
+    // Find candidate schedules
+    const schedules = await prisma.schedule.findMany({
+        where: {
+            tenantId,
+            startDate: { lte: now },
+            AND: [
+                {
+                    OR: [
+                        { screenId },
+                        { group: { members: { some: { screenId } } } }
+                    ]
+                },
+                {
+                    OR: [
+                        { endDate: null },
+                        { endDate: { gte: now } }
+                    ]
+                }
+            ]
+        },
+        orderBy: { priority: 'desc' } // High priority first
+    });
+
+    // Filter by Time & Day (Dayparting)
+    const activeSchedule = schedules.find(schedule => {
+        // Check Days of Week
+        if (schedule.daysOfWeek && !schedule.daysOfWeek.split(',').includes(currentDay)) {
+            return false;
+        }
+
+        // Check Time Range
+        if (schedule.startTime && schedule.endTime) {
+            return isTimeInRange(currentTime, schedule.startTime, schedule.endTime);
+        }
+
+        return true;
+    });
+
+    return activeSchedule;
+};
+
+// Helper: Handle overnight schedules (e.g. 22:00 to 02:00)
+const isTimeInRange = (current: string, start: string, end: string) => {
+    if (start <= end) {
+        return current >= start && current <= end;
+    } else {
+        // Overnight: 22:00 -> 02:00. Current 23:00 is valid. Current 01:00 is valid.
+        return current >= start || current <= end;
+    }
+};
 
 // Helper to create screen logs
 export const createLog = async (screenId: string, level: 'INFO' | 'WARN' | 'ERROR', message: string) => {
@@ -19,6 +82,94 @@ export const createLog = async (screenId: string, level: 'INFO' | 'WARN' | 'ERRO
     console.error('Failed to create screen log:', error);
   }
 };
+
+const serializePlayerPlaylist = (playlist: any) => {
+  if (!playlist) return null;
+
+  return {
+    ...playlist,
+    zones: Array.isArray(playlist.zones)
+      ? playlist.zones.map((zone: any) => ({
+          ...zone,
+          items: Array.isArray(zone.items)
+            ? zone.items.map((item: any) => ({
+                ...item,
+                media: item.media
+                  ? {
+                      ...item.media,
+                      filename: item.media.name,
+                      sha256: item.media.sha256 ?? null
+                    }
+                  : null
+              }))
+            : []
+        }))
+      : []
+  };
+};
+
+type ScreenListOptions = {
+  includeDeleted?: boolean;
+  deletedOnly?: boolean;
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+};
+
+const parseScreenRecord = (screen: any) => {
+  let tags = [];
+  try {
+    tags = screen.tags ? JSON.parse(screen.tags) : [];
+  } catch (e) {
+    console.warn(`Failed to parse tags for screen ${screen.id}`, e);
+  }
+
+  let location = null;
+  try {
+    location = screen.location ? JSON.parse(screen.location) : null;
+  } catch (e) {
+    console.warn(`Failed to parse location for screen ${screen.id}`, e);
+  }
+
+  return {
+    ...screen,
+    tags,
+    location,
+    nativeDiagnostics: buildNativeDiagnostics(screen)
+  };
+};
+
+const buildScreenSummary = (screens: any[]) =>
+  screens.reduce(
+    (summary, screen) => {
+      const telemetry = screen?.config?.telemetry || {};
+      summary.total += 1;
+      if (screen.status === 'ONLINE') {
+        summary.online += 1;
+      } else {
+        summary.offline += 1;
+      }
+      if (screen.playerType === 'Android' || `${telemetry.platform || ''}`.toLowerCase().includes('native')) {
+        summary.native += 1;
+      }
+      if (telemetry.deviceOwnerState === 'DEVICE_OWNER') {
+        summary.deviceOwner += 1;
+      }
+      if (telemetry.downloadState === 'DOWNLOADING' || telemetry.downloadProgress?.status === 'DOWNLOADING') {
+        summary.downloading += 1;
+      }
+      return summary;
+    },
+    {
+      total: 0,
+      online: 0,
+      offline: 0,
+      native: 0,
+      deviceOwner: 0,
+      downloading: 0
+    }
+  );
 
 // Player: Register device and get pairing code
 export const registerPlayerDevice = async () => {
@@ -67,6 +218,10 @@ export const checkPairingStatus = async (code: string) => {
 
   const screen = pairingCode.screen;
 
+  if (screen.isDeleted || screen.status === 'DELETED') {
+    throw new Error('Invalid pairing code');
+  }
+
   if (screen.tenantId) {
     // Paired! Issue Token
     const token = generateToken({
@@ -93,6 +248,7 @@ export const checkPairingStatus = async (code: string) => {
 
 // Player: Heartbeat
 export const processHeartbeat = async (screenId: string, metadata?: any) => {
+  appMetrics.recordHeartbeat();
   // Update screen status and potentially store telemetry in config for quick access
   const screen = await prisma.screen.findUnique({ where: { id: screenId } });
   
@@ -104,21 +260,66 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
       throw new Error('Screen is deleted');
   }
   
+  const normalizedMetadata = normalizeHeartbeatTelemetry(metadata);
   let newConfig = screen?.config as any || {};
-  if (metadata) {
+  if (Object.keys(normalizedMetadata).length > 0) {
     const currentTelemetry = newConfig.telemetry || {};
     // Merge telemetry to preserve fields not present in current metadata (like cachedFiles if not sent every time)
     newConfig = {
       ...newConfig,
       telemetry: {
         ...currentTelemetry,
-        ...metadata
+        ...normalizedMetadata
       }
     };
   }
 
   // Check for pending commands to return to the player
-  const pendingCommands = newConfig.pendingCommands || [];
+  let pendingCommands = newConfig.pendingCommands || [];
+
+  // Phase 2.2: Advanced Scheduling - Check if there are active schedules for this screen
+  // If so, we should prioritize scheduled playlists over the default one
+  // This logic is simplified: The backend resolves the active schedule and tells the player "Play this playlist"
+  try {
+      if (screen.tenantId) {
+        const activeSchedule = await resolveActiveSchedule(screenId, screen.tenantId);
+        if (activeSchedule) {
+          // Check if the player is already playing this playlist
+          // The player sends 'currentPlaylistId' in telemetry (metadata)
+          const currentPlaylistId = normalizedMetadata?.currentPlaylistId;
+          
+          if (currentPlaylistId !== activeSchedule.playlistId) {
+              console.log(`[Scheduler] Screen ${screenId} should play scheduled playlist ${activeSchedule.playlistId}`);
+              
+              // Create a 'PLAY_PLAYLIST' command if not already pending
+              const alreadyPending = pendingCommands.find((c: any) => 
+                  c.type === 'PLAY_PLAYLIST' && c.payload?.playlistId === activeSchedule.playlistId
+              );
+              
+              if (!alreadyPending) {
+                   const newCommand = {
+                      id: Date.now().toString(),
+                      type: 'PLAY_PLAYLIST',
+                      payload: { playlistId: activeSchedule.playlistId },
+                      status: 'PENDING',
+                      createdAt: new Date(),
+                      updatedAt: new Date()
+                   };
+                   
+                   pendingCommands.push(newCommand);
+                   
+                   // Also add to history
+                   const history = newConfig.commandHistory || [];
+                   history.unshift(newCommand);
+                   if (history.length > 50) history.pop();
+                   newConfig.commandHistory = history;
+              }
+          }
+        }
+      }
+  } catch (err) {
+      console.error('Failed to resolve schedule', err);
+  }
 
   // SELF-HEALING: Check for stuck SENT commands (older than 2 minutes) and re-queue them
   const history = newConfig.commandHistory || [];
@@ -144,9 +345,9 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
   }
   
   // Handle command updates from player
-  if (metadata && metadata.commandUpdates && Array.isArray(metadata.commandUpdates)) {
+  if (normalizedMetadata && normalizedMetadata.commandUpdates && Array.isArray(normalizedMetadata.commandUpdates)) {
     const history = newConfig.commandHistory || [];
-    metadata.commandUpdates.forEach((update: any) => {
+    normalizedMetadata.commandUpdates.forEach((update: any) => {
       const cmd = history.find((c: any) => c.id === update.id);
       if (cmd) {
         cmd.status = update.status;
@@ -187,24 +388,15 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
       });
   }
 
-  await prisma.screen.update({
-    where: { id: screenId },
-    data: {
-      lastSeenAt: new Date(),
-      status: 'ONLINE',
-      config: newConfig
-    }
-  });
-
   if (screen?.status !== 'ONLINE') {
       await createLog(screenId, 'INFO', 'Screen is back ONLINE');
   }
 
    // Log download status
-   if (metadata && metadata.downloadProgress) {
+   if (normalizedMetadata && normalizedMetadata.downloadProgress) {
       const prevTelemetry = (screen?.config as any)?.telemetry;
       const prevStatus = prevTelemetry?.downloadProgress?.status;
-      const currentStatus = metadata.downloadProgress.status;
+      const currentStatus = normalizedMetadata.downloadProgress.status;
       
       if (currentStatus === 'DOWNLOADING' && prevStatus !== 'DOWNLOADING') {
           await createLog(screenId, 'INFO', 'Started downloading media');
@@ -212,8 +404,8 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
    }
 
   // Log failed commands
-  if (metadata && metadata.commandUpdates) {
-      metadata.commandUpdates.forEach((update: any) => {
+  if (normalizedMetadata && normalizedMetadata.commandUpdates) {
+      normalizedMetadata.commandUpdates.forEach((update: any) => {
           if (update.status === 'FAILED') {
               createLog(screenId, 'ERROR', `Command ${update.id} failed: ${update.message || 'Unknown error'}`);
           } else if (update.status === 'COMPLETED') {
@@ -223,8 +415,8 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
   }
 
   // Log download reports
-  if (metadata && metadata.downloadReports && Array.isArray(metadata.downloadReports)) {
-      const reports = metadata.downloadReports;
+  if (normalizedMetadata && normalizedMetadata.downloadReports && Array.isArray(normalizedMetadata.downloadReports)) {
+      const reports = normalizedMetadata.downloadReports;
       const mediaIds = reports.map((r: any) => r.fileId).filter((id: any) => typeof id === 'string');
       
       let mediaMap = new Map<string, string>();
@@ -250,7 +442,51 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
       }
   }
 
-  return { status: 'ok', commands: pendingCommands };
+  try {
+    const systemSettings = await systemSettingsService.getSystemSettings();
+    if (systemSettings && systemSettings.traffic) {
+      newConfig.traffic = systemSettings.traffic;
+    }
+  } catch (err) {
+    console.error('Failed to inject traffic settings', err);
+  }
+
+  // Handle Telemetry Data
+  const telemetryData: any = {};
+  if (normalizedMetadata) {
+      if (normalizedMetadata.cpuTemp !== undefined) telemetryData.cpuTemp = normalizedMetadata.cpuTemp;
+      if (normalizedMetadata.freeStorageBytes !== undefined) telemetryData.freeDiskSpace = normalizedMetadata.freeStorageBytes;
+      if (normalizedMetadata.totalStorageBytes !== undefined) telemetryData.totalDiskSpace = normalizedMetadata.totalStorageBytes;
+      if (normalizedMetadata.memoryUsedBytes !== undefined) telemetryData.usedMemory = normalizedMetadata.memoryUsedBytes;
+      if (normalizedMetadata.memoryTotalBytes !== undefined) telemetryData.totalMemory = normalizedMetadata.memoryTotalBytes;
+      if (normalizedMetadata.appVersion !== undefined) telemetryData.appVersion = normalizedMetadata.appVersion;
+      
+      // Alerting Logic: Low Disk Space (< 1GB)
+      // 1 GB = 1024 * 1024 * 1024 bytes
+      const MIN_DISK_SPACE = 1073741512; 
+      if (normalizedMetadata.freeStorageBytes && normalizedMetadata.freeStorageBytes < MIN_DISK_SPACE) {
+          // Check if we already alerted recently (simple throttle mechanism could be added here)
+          console.warn(`[Alert] Screen ${screenId} has low disk space: ${(normalizedMetadata.freeStorageBytes / 1024 / 1024).toFixed(2)} MB`);
+          // TODO: Implement email/slack alert
+          await createLog(screenId, 'WARN', `Low Disk Space: ${(normalizedMetadata.freeStorageBytes / 1024 / 1024).toFixed(2)} MB remaining`);
+      }
+  }
+
+  if (Object.keys(telemetryData).length > 0) {
+      telemetryData.lastTelemetryAt = new Date();
+  }
+
+  await prisma.screen.update({
+      where: { id: screenId },
+      data: {
+        lastSeenAt: new Date(),
+        status: 'ONLINE',
+        config: newConfig,
+        ...telemetryData
+      }
+  });
+
+  return { status: 'ok', commands: pendingCommands, config: newConfig };
 };
 
 export const sendCommand = async (screenId: string, tenantId: string, command: string, payload?: any) => {
@@ -259,14 +495,16 @@ export const sendCommand = async (screenId: string, tenantId: string, command: s
     throw new Error('Screen not found or unauthorized');
   }
 
+  const normalizedCommand = normalizeNativeCommand(command, payload);
+
   const config = (screen.config as any) || {};
   const pendingCommands = config.pendingCommands || [];
   const commandHistory = config.commandHistory || [];
   
   const newCommand = {
     id: Date.now().toString(),
-    type: command,
-    payload,
+    type: normalizedCommand.type,
+    payload: normalizedCommand.payload,
     status: 'PENDING',
     createdAt: new Date(),
     updatedAt: new Date()
@@ -280,9 +518,10 @@ export const sendCommand = async (screenId: string, tenantId: string, command: s
     commandHistory.pop();
   }
 
-  console.log(`[Command] Queued ${command} for screen ${screenId}`);
+  console.log(`[Command] Queued ${normalizedCommand.type} for screen ${screenId}`);
+  appMetrics.recordCommandQueued();
 
-  await createLog(screenId, 'INFO', `Command ${command} queued`);
+  await createLog(screenId, 'INFO', `Command ${normalizedCommand.type} queued`);
 
   return prisma.screen.update({
     where: { id: screenId },
@@ -372,7 +611,12 @@ export const pairScreen = async (
       latitude,
       longitude,
       orientation: orientation || 'LANDSCAPE',
-      playerType
+      playerType,
+      // Phase 2.1: Inject traffic settings on pair
+      config: {
+         ...((pairingCode.screen.config as any) || {}),
+         traffic: (await systemSettingsService.getSystemSettings())?.traffic
+      }
     }
   });
 
@@ -516,42 +760,76 @@ export const requestSnapshot = async (screenId: string, tenantId: string) => {
 };
 
 // CMS: Get Screens
-export const getTenantScreens = async (tenantId: string, includeDeleted: boolean = false) => {
+export const getTenantScreens = async (tenantId: string, options: boolean | ScreenListOptions = false) => {
+  const normalizedOptions =
+    typeof options === 'boolean'
+      ? { includeDeleted: options }
+      : options;
+  const includeDeleted = !!normalizedOptions.includeDeleted;
+  const deletedOnly = !!normalizedOptions.deletedOnly;
+  const page = normalizedOptions.page && normalizedOptions.page > 0 ? normalizedOptions.page : undefined;
+  const pageSize = normalizedOptions.pageSize && normalizedOptions.pageSize > 0
+    ? Math.min(normalizedOptions.pageSize, 100)
+    : undefined;
+  const search = normalizedOptions.search?.trim();
+  const status = normalizedOptions.status?.trim().toUpperCase();
+
   const where: any = { tenantId };
-  if (!includeDeleted) {
+  if (deletedOnly) {
+    where.isDeleted = true;
+  } else if (!includeDeleted) {
     where.isDeleted = false;
   }
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { location: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+  if (status && status !== 'ALL') {
+    where.status = status === 'OFFLINE' ? { not: 'ONLINE' } : status;
+  }
 
-  const screens = await prisma.screen.findMany({
+  const query = {
     where,
-    orderBy: { lastSeenAt: 'desc' },
+    orderBy: { lastSeenAt: 'desc' as const },
     include: {
       activePlaylist: true
     }
-  });
+  };
 
-  // Parse JSON fields for response
-  return screens.map(s => {
-    let tags = [];
-    try {
-      tags = s.tags ? JSON.parse(s.tags) : [];
-    } catch (e) {
-      console.warn(`Failed to parse tags for screen ${s.id}`, e);
-    }
+  if (!page || !pageSize) {
+    const screens = await prisma.screen.findMany(query);
+    return screens.map(parseScreenRecord);
+  }
 
-    let location = null;
-    try {
-      location = s.location ? JSON.parse(s.location) : null;
-    } catch (e) {
-      console.warn(`Failed to parse location for screen ${s.id}`, e);
-    }
+  const [totalItems, screens, summaryScreens] = await Promise.all([
+    prisma.screen.count({ where }),
+    prisma.screen.findMany({
+      ...query,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.screen.findMany({
+      where,
+      select: {
+        status: true,
+        playerType: true,
+        config: true,
+      }
+    })
+  ]);
 
-    return {
-      ...s,
-      tags,
-      location
-    };
-  });
+  return {
+    items: screens.map(parseScreenRecord),
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / pageSize))
+    },
+    summary: buildScreenSummary(summaryScreens)
+  };
 };
 
 export const getScreenById = async (screenId: string, tenantId: string) => {
@@ -577,7 +855,8 @@ export const getScreenById = async (screenId: string, tenantId: string) => {
   return {
     ...screen,
     tags: screen.tags ? JSON.parse(screen.tags) : [],
-    location: screen.location ? JSON.parse(screen.location) : null
+    location: screen.location ? JSON.parse(screen.location) : null,
+    nativeDiagnostics: buildNativeDiagnostics(screen)
   };
 };
 
@@ -624,7 +903,16 @@ export const getScreenContent = async (screenId: string) => {
     }
   });
 
-  if (!screen) throw new Error('Screen not found');
+  if (!screen || screen.isDeleted || screen.status === 'DELETED') throw new Error('Screen not found');
+
+  let parsedLocation: any = null;
+  if (screen.location) {
+    try {
+      parsedLocation = JSON.parse(screen.location);
+    } catch {
+      parsedLocation = screen.location;
+    }
+  }
 
   let scheduledPlaylist: any = null;
 
@@ -711,6 +999,10 @@ export const getScreenContent = async (screenId: string) => {
     const isTimeInRange = (startTime: string | null | undefined, endTime: string | null | undefined, nowTime: string) => {
       if (!startTime) return false;
       if (endTime) {
+        if (startTime > endTime) {
+           // Overnight schedule (e.g. 22:00 -> 05:00)
+           return nowTime >= startTime || nowTime <= endTime;
+        }
         return startTime <= nowTime && nowTime <= endTime;
       }
       return nowTime >= startTime;
@@ -766,7 +1058,8 @@ export const getScreenContent = async (screenId: string) => {
           const config = tenant.config as any;
           tenantKeys = {
               googleMapsApiKey: config.googleMapsApiKey,
-              weatherApiKey: config.weatherApiKey
+              weatherApiKey: config.weatherApiKey,
+              newsFeedUrls: Array.isArray(config.newsFeedUrls) ? config.newsFeedUrls : []
           };
 
           // Check for default playlist if nothing else is playing (Priority 0)
@@ -796,10 +1089,36 @@ export const getScreenContent = async (screenId: string) => {
     screenId: screen.id,
     name: screen.name,
     orientation: screen.orientation,
+    location: parsedLocation,
+    latitude: screen.latitude,
+    longitude: screen.longitude,
     config: screen.config,
-    playlist: scheduledPlaylist || screen.activePlaylist || defaultPlaylist,
+    playlist: serializePlayerPlaylist(scheduledPlaylist || screen.activePlaylist || defaultPlaylist),
     ...tenantKeys
   };
+};
+
+export const getNativePlaybackManifest = async (screenId: string) => {
+  const [screen, content] = await Promise.all([
+    prisma.screen.findUnique({ where: { id: screenId } }),
+    getScreenContent(screenId)
+  ]);
+
+  if (!screen) {
+    throw new Error('Screen not found');
+  }
+
+  return buildNativePlaybackManifest(screen, content);
+};
+
+export const getNativePlaybackManifestForTenant = async (screenId: string, tenantId: string) => {
+  const screen = await prisma.screen.findUnique({ where: { id: screenId } });
+  if (!screen || screen.tenantId !== tenantId) {
+    throw new Error('Screen not found');
+  }
+
+  const content = await getScreenContent(screenId);
+  return buildNativePlaybackManifest(screen, content);
 };
 
 export const exportScreenLogs = async (screenId: string, tenantId: string) => {

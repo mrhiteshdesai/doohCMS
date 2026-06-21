@@ -82,3 +82,52 @@ export const bulkMove = async (fileIds: string[], folderIds: string[], targetFol
   const response = await api.post('/library/bulk/move', { fileIds, folderIds, targetFolderId });
   return response.data;
 };
+
+export const getPresignedUrl = async (filename: string, contentType: string) => {
+  const response = await api.post('/library/presigned-url', { filename, contentType });
+  return response.data;
+};
+
+export const registerFile = async (data: any) => {
+  const response = await api.post('/library/register', data);
+  return response.data;
+};
+
+export const uploadToS3 = async (url: string, file: File, contentType: string, onProgress?: (progress: number) => void) => {
+  return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      xhr.setRequestHeader('Content-Type', contentType);
+      
+      xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) {
+              const percentComplete = Math.round((e.loaded / e.total) * 100);
+              onProgress(percentComplete);
+          }
+      };
+      
+      xhr.onload = () => {
+          if (xhr.status === 200 || xhr.status === 201) {
+              resolve(true);
+          } else {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+      };
+      
+      xhr.onerror = () => reject(new Error('Upload failed'));
+      
+      xhr.send(file);
+  });
+};
+export const getFiles = async (folderId?: string, search?: string) => {
+    const params: any = {};
+    if (folderId) params.folderId = folderId;
+    if (search) params.search = search;
+    const response = await api.get('/library', { params });
+    // Assuming the response structure is { folders: [], files: [] } or just files depending on endpoint
+    // But getLibrary returns { folders, files }. This function seems redundant or specific.
+    // Let's check getLibrary usage.
+    // Actually mediaController.getLibrary handles both.
+    return response.data.files;
+};
+export const getFolders = getAllFolders; // Alias if needed

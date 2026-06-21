@@ -181,7 +181,7 @@ model UserRole {
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
+  id        String   @default(uuid())
   action    String
   details   String?
   userId    String?
@@ -189,6 +189,10 @@ model AuditLog {
   createdAt DateTime @default(now())
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@id([id, createdAt])
+  @@index([tenantId])
+  @@index([userId])
 }
 
 model ApiKey {
@@ -228,6 +232,15 @@ model Screen {
   snapshots        ScreenSnapshot[]
   isDeleted        Boolean             @default(false)
   deletedAt        DateTime?
+
+  // Telemetry & Health
+  cpuTemp          Float?
+  freeDiskSpace    BigInt?
+  totalDiskSpace   BigInt?
+  usedMemory       BigInt?
+  totalMemory      BigInt?
+  appVersion       String?
+  lastTelemetryAt  DateTime?
 }
 
 model ScreenPairingCode {
@@ -239,20 +252,25 @@ model ScreenPairingCode {
 }
 
 model ScreenHeartbeat {
-  id        String   @id @default(uuid())
+  id        String   @default(uuid())
   screenId  String
   timestamp DateTime @default(now())
   metadata  Json?
   screen    Screen   @relation(fields: [screenId], references: [id])
+
+  @@id([id, timestamp])
+  @@index([screenId])
 }
 
 model ScreenLog {
-  id        String   @id @default(uuid())
+  id        String   @default(uuid())
   screenId  String
   level     String
   message   String
   createdAt DateTime @default(now())
   screen    Screen   @relation(fields: [screenId], references: [id])
+
+  @@id([id, createdAt])
 }
 
 model ScreenSnapshot {
@@ -281,6 +299,7 @@ model MediaFile {
   name          String
   url           String
   mimeType      String
+  sha256        String?
   size          Float
   folderId      String?
   tenantId      String
@@ -296,7 +315,7 @@ model MediaFile {
 }
 
 model ProofOfPlay {
-  id         String    @id @default(uuid())
+  id         String    @default(uuid())
   screenId   String
   mediaId    String
   playlistId String?
@@ -307,6 +326,12 @@ model ProofOfPlay {
   playlist   Playlist? @relation(fields: [playlistId], references: [id])
   screen     Screen    @relation(fields: [screenId], references: [id])
   tenant     Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@id([id, startedAt])
+  @@index([screenId])
+  @@index([mediaId])
+  @@index([playlistId])
+  @@index([tenantId])
 }
 
 model Schedule {
@@ -335,6 +360,8 @@ model Schedule {
 model SystemSettings {
   id        String   @id @default(uuid())
   storage   Json?
+  cdn       Json?
+  traffic   Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

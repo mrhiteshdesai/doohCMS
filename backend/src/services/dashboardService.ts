@@ -43,26 +43,40 @@ export const getDashboardStats = async (tenantId: string) => {
       }
     });
 
-    // 4. Top Media (Safe implementation)
-    // Fetch grouping without order first if orderBy is causing issues
+    // 4. Top Media (Optimized with Continuous Aggregates)
     let topMediaRaw: any[] = [];
     try {
-      // Cast to any to bypass strict type check for now if it persists
-      const result = await prisma.proofOfPlay.groupBy({
-        by: ['mediaId'],
-        where: { tenantId },
-        _count: {
-          _all: true
-        }
-      });
-      topMediaRaw = result as any[];
-      
-      // Sort in JS
-      topMediaRaw.sort((a, b) => b._count._all - a._count._all);
-      topMediaRaw = topMediaRaw.slice(0, 5);
-
+        // Try to query the materialized view first
+        const result: any[] = await prisma.$queryRaw`
+            SELECT "mediaId", sum(play_count) as total_plays
+            FROM pop_hourly_stats
+            WHERE "tenantId" = ${tenantId}
+            GROUP BY "mediaId"
+            ORDER BY total_plays DESC
+            LIMIT 5
+        `;
+        
+        topMediaRaw = result.map(r => ({
+            mediaId: r.mediaId,
+            _count: { _all: Number(r.total_plays) }
+        }));
     } catch (e) {
-      console.error('Error fetching top media:', e);
+        // Fallback to standard Prisma query if view is missing or fails
+        // console.warn('Analytics view query failed, falling back to raw table:', e);
+        try {
+            const result = await prisma.proofOfPlay.groupBy({
+                by: ['mediaId'],
+                where: { tenantId },
+                _count: {
+                    _all: true
+                }
+            });
+            topMediaRaw = result as any[];
+            topMediaRaw.sort((a, b) => b._count._all - a._count._all);
+            topMediaRaw = topMediaRaw.slice(0, 5);
+        } catch (err) {
+            console.error('Error fetching top media:', err);
+        }
     }
 
     // Fetch names for top media

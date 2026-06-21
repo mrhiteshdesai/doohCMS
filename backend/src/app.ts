@@ -3,6 +3,15 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
+import crypto from 'crypto';
+import prisma from './prisma';
+import { appEnv } from './config/env';
+import { appMetrics } from './observability/metrics';
+
+// Fix BigInt serialization
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
 
 import authRoutes from './routes/authRoutes';
 import screenRoutes from './routes/screenRoutes';
@@ -18,25 +27,22 @@ import tenantRoutes from './routes/tenantRoutes';
 import reportRoutes from './routes/reportRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import systemSettingsRoutes from './routes/systemSettingsRoutes';
+import analyticsRoutes from './routes/analyticsRoutes';
 
 const app = express();
+
+app.set('trust proxy', appEnv.TRUST_PROXY);
 
 // Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-const allowedOrigins = [
-  'https://cms.brandeagles.com',
-  'http://localhost:5173',
-  'http://localhost:3000'
-];
-
 app.use(cors({
   origin: function (origin, callback) {
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
+    if (appEnv.corsOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
       return callback(new Error(msg), false);
     }
@@ -47,6 +53,19 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan('dev'));
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  const requestId = req.header('x-request-id') || crypto.randomUUID();
+  res.setHeader('x-request-id', requestId);
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const route = req.route?.path || req.originalUrl.split('?')[0] || req.path;
+    appMetrics.recordRequest(req.method, route, res.statusCode, durationMs);
+  });
+
+  next();
+});
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -54,6 +73,26 @@ app.get('/health', (req, res) => {
 });
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get(['/health/live', '/api/health/live'], (req, res) => {
+  res.status(200).json({ status: 'live', timestamp: new Date().toISOString() });
+});
+app.get(['/health/ready', '/api/health/ready'], async (req, res) => {
+  try {
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Database readiness timeout')), appEnv.HEALTHCHECK_DB_TIMEOUT_MS)
+      ),
+    ]);
+    res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(503).json({
+      status: 'not_ready',
+      timestamp: new Date().toISOString(),
+      message: error.message,
+    });
+  }
 });
 
 // Routes
@@ -71,6 +110,7 @@ app.use('/api/tenant', tenantRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Static files serving with robust path resolution
 const uploadDir = path.join(__dirname, '../uploads');

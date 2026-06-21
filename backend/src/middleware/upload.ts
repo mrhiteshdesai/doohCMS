@@ -67,4 +67,24 @@ const upload = multer({
   }
 });
 
+const supportBundleUpload = multer({
+  storage: dynamicStorage,
+  fileFilter: (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+    const allowed =
+      file.mimetype === 'application/zip' ||
+      file.mimetype === 'application/x-zip-compressed' ||
+      file.mimetype === 'application/json' ||
+      file.mimetype.startsWith('text/');
+    if (allowed) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Only support bundle files are allowed! Received: ${file.mimetype}`));
+    }
+  },
+  limits: {
+    fileSize: 250 * 1024 * 1024,
+  }
+});
+
 export default upload;
+export { supportBundleUpload };

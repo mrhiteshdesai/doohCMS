@@ -7,7 +7,7 @@ import IntegrationSettings from './IntegrationSettings';
 import StorageSettings from './StorageSettings';
 import PlayerSettings from './PlayerSettings';
 import { getTenantSettings, updateTenantSettings, TenantSettings } from '../../services/tenant';
-import { getSystemSettings, updateSystemSettings, SystemSettings } from '../../services/systemSettings';
+import { getSystemSettings, updateSystemSettings, getRetentionPolicies, updateRetentionPolicy, SystemSettings } from '../../services/systemSettings';
 import PermissionGuard from '../../components/PermissionGuard';
 import { useAuth } from '../../context/AuthContext';
 
@@ -24,6 +24,8 @@ const SettingsPage = () => {
   });
 
   const [systemSettings, setSystemSettings] = useState<SystemSettings | undefined>(undefined);
+  const [retentionPolicies, setRetentionPolicies] = useState<Record<string, number>>({});
+  const [retentionChanged, setRetentionChanged] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (checkPermission('settings', 'read')) {
@@ -48,7 +50,6 @@ const SettingsPage = () => {
       setSettings(tenantData);
 
       // Only attempt to fetch system settings if user is admin or Organization Admin
-      // We'll rely on backend enforcement, but good to avoid 403s in console if possible
       const isSystemAdmin = user?.role === 'admin' || 
                             (Array.isArray(user?.roles) && user.roles.some((r: any) => 
                                 (typeof r === 'string' && (r === 'admin' || r === 'Organization Admin')) ||
@@ -62,6 +63,13 @@ const SettingsPage = () => {
             setSystemSettings(systemData);
         } catch (e) {
             console.log("Could not fetch system settings (likely not authorized)");
+        }
+
+        try {
+            const policies = await getRetentionPolicies();
+            setRetentionPolicies(policies);
+        } catch (e) {
+            console.log("Could not fetch retention policies");
         }
       }
 
@@ -82,9 +90,16 @@ const SettingsPage = () => {
       await updateTenantSettings(settings);
 
       // Save system settings if they exist and were modified
-      // (For simplicity we just save if the object exists)
       if (systemSettings) {
         await updateSystemSettings(systemSettings);
+      }
+
+      // Save retention policies if changed
+      if (Object.keys(retentionChanged).length > 0) {
+        for (const [table, days] of Object.entries(retentionChanged)) {
+            await updateRetentionPolicy(table, days);
+        }
+        setRetentionChanged({});
       }
 
       setSaveStatus('success');
@@ -117,6 +132,16 @@ const SettingsPage = () => {
   const handleSystemChange = (key: string, value: any) => {
     setSystemSettings(prev => {
         if (!prev) return prev;
+        
+        // Handle top-level keys
+        if (key === 'cdn' || key === 'traffic') {
+             return {
+                ...prev,
+                [key]: value
+            };
+        }
+
+        // Default to storage settings (legacy behavior from StorageSettings.tsx)
         return {
             ...prev,
             storage: {
@@ -125,6 +150,11 @@ const SettingsPage = () => {
             }
         };
     });
+  };
+
+  const handleRetentionChange = (table: string, days: number) => {
+    setRetentionPolicies(prev => ({ ...prev, [table]: days }));
+    setRetentionChanged(prev => ({ ...prev, [table]: days }));
   };
 
   const tabs = [
@@ -214,8 +244,10 @@ const SettingsPage = () => {
                 <StorageSettings 
                     settings={settings} 
                     systemSettings={systemSettings}
+                    retentionPolicies={retentionPolicies}
                     onChange={handleChange} 
                     onSystemChange={handleSystemChange}
+                    onRetentionChange={handleRetentionChange}
                 />
             )}
           </div>

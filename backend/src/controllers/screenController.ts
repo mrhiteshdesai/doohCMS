@@ -103,11 +103,22 @@ export const getScreens = async (req: Request, res: Response) => {
     // Check for 'deleted' (frontend) or 'includeDeleted' (api) params
     const showDeletedOnly = req.query.deleted === 'true' || req.query.archived === 'true';
     const includeDeleted = showDeletedOnly || req.query.includeDeleted === 'true';
+    const page = Number(req.query.page);
+    const pageSize = Number(req.query.pageSize);
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
-    const screens = await screenService.getTenantScreens(tenantId, includeDeleted);
+    const screens = await screenService.getTenantScreens(tenantId, {
+      includeDeleted,
+      deletedOnly: showDeletedOnly,
+      page: Number.isFinite(page) && page > 0 ? page : undefined,
+      pageSize: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : undefined,
+      search,
+      status,
+    });
     
     // If specifically asking for deleted/archived screens, filter for them
-    if (showDeletedOnly) {
+    if (showDeletedOnly && Array.isArray(screens)) {
         const archived = screens.filter(s => s.isDeleted);
         return res.status(200).json(archived);
     }
@@ -128,6 +139,17 @@ export const getScreen = async (req: Request, res: Response) => {
     const tenantId = (req as any).user.tenantId;
     const screen = await screenService.getScreenById(id, tenantId);
     res.status(200).json(screen);
+  } catch (error: any) {
+    res.status(404).json({ message: error.message });
+  }
+};
+
+export const getNativeManifest = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const tenantId = (req as any).user.tenantId;
+    const manifest = await screenService.getNativePlaybackManifestForTenant(id, tenantId);
+    res.status(200).json(manifest);
   } catch (error: any) {
     res.status(404).json({ message: error.message });
   }

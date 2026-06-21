@@ -4,18 +4,11 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <androidx.media3.ui.PlayerView
-        android:id="@+id/player_view"
+    <FrameLayout
+        android:id="@+id/playback_stage"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:keepScreenOn="true" />
-
-    <ImageView
-        android:id="@+id/image_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="fitXY"
-        android:visibility="gone" />
 
     <LinearLayout
         android:id="@+id/overlay_container"
@@ -115,6 +108,40 @@
             android:textColor="#B3FFFFFF"
             android:textSize="12sp" />
 
+        <TextView
+            android:id="@+id/settings_access_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Access: -"
+            android:textColor="#B3FFFFFF"
+            android:textSize="12sp" />
+
+        <EditText
+            android:id="@+id/settings_tech_pin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Technician PIN (6+ digits)"
+            android:inputType="numberPassword"
+            android:padding="12dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#80FFFFFF" />
+
+        <Button
+            android:id="@+id/settings_unlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Unlock Settings" />
+
+        <Button
+            android:id="@+id/settings_change_pin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Change Technician PIN" />
+
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/settings_start_on_boot"
             android:layout_width="match_parent"
@@ -151,6 +178,20 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="Re-Pair Device" />
+
+        <Button
+            android:id="@+id/settings_provisioning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Device Owner Setup" />
+
+        <Button
+            android:id="@+id/settings_recovery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Recovery" />
 
         <Button
             android:id="@+id/settings_exit"

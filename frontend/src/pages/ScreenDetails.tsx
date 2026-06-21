@@ -7,7 +7,8 @@ import PermissionGuard from '../components/PermissionGuard';
 import { 
   Monitor, Activity, Terminal, Camera, RefreshCw, Power, ArrowLeft, 
   Clock, Save, FileText, Database, PlaySquare, Settings, Download, 
-  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2, X, Info
+  Smartphone, Maximize, HardDrive, RotateCw, Thermometer, Cpu, Search, CheckCircle, Share, Calendar, Trash2, X, Info,
+  Shield, AlertTriangle, PackageSearch
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFullUrl } from '../utils/url';
@@ -27,6 +28,8 @@ const ScreenDetails = () => {
     kioskEnabled: false,
     startOnBoot: true
   });
+  const [nativeManifest, setNativeManifest] = useState<any>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
 
   const fetchScreen = async () => {
     try {
@@ -38,16 +41,33 @@ const ScreenDetails = () => {
       const telemetry = res.data.config?.telemetry || {};
       setAndroidRemote((prev: any) => ({
         ...prev,
-        apiBase: telemetry.apiBase || prev.apiBase || '',
-        kioskEnabled: telemetry.kioskEnabled !== undefined ? !!telemetry.kioskEnabled : prev.kioskEnabled,
-        startOnBoot: telemetry.startOnBoot !== undefined ? !!telemetry.startOnBoot : prev.startOnBoot
+        apiBase: res.data.nativeDiagnostics?.apiBase || telemetry.apiBase || prev.apiBase || '',
+        kioskEnabled: res.data.nativeDiagnostics?.kioskEnabled !== undefined ? !!res.data.nativeDiagnostics.kioskEnabled : (telemetry.kioskEnabled !== undefined ? !!telemetry.kioskEnabled : prev.kioskEnabled),
+        startOnBoot: res.data.nativeDiagnostics?.startOnBoot !== undefined ? !!res.data.nativeDiagnostics.startOnBoot : (telemetry.startOnBoot !== undefined ? !!telemetry.startOnBoot : prev.startOnBoot)
       }));
+      if (res.data.nativeDiagnostics?.isNativePlayer || res.data.playerType === 'Android') {
+        fetchNativeManifest();
+      } else {
+        setNativeManifest(null);
+      }
     } catch (error) {
       console.error('Failed to fetch screen details:', error);
       toast.error('Failed to load screen details');
       navigate('/screens');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNativeManifest = async () => {
+    try {
+      setManifestLoading(true);
+      const res = await api.get(`/screens/${id}/native-manifest`);
+      setNativeManifest(res.data);
+    } catch (error) {
+      console.error('Failed to fetch native manifest:', error);
+    } finally {
+      setManifestLoading(false);
     }
   };
 
@@ -185,6 +205,8 @@ const ScreenDetails = () => {
   const telemetry = screen.config?.telemetry || {};
   const pendingCommands = screen.config?.pendingCommands || [];
   const displayQueue = screen.config?.commandHistory || [];
+  const nativeDiagnostics = screen.nativeDiagnostics || {};
+  const isNativePlayer = !!nativeDiagnostics.isNativePlayer || screen.playerType === 'Android';
   
   // Phase 3: Telemetry Data
   const deviceHealth = {
@@ -194,6 +216,16 @@ const ScreenDetails = () => {
     memory: screen.usedMemory && screen.totalMemory ? `${(Number(screen.usedMemory) / 1024 / 1024).toFixed(0)} / ${(Number(screen.totalMemory) / 1024 / 1024).toFixed(0)} MB` : 'N/A',
     version: screen.appVersion || 'Unknown',
     lastUpdate: screen.lastTelemetryAt ? new Date(screen.lastTelemetryAt).toLocaleString() : 'Never'
+  };
+  const nativeHealth = {
+    freeStorage: formatBytes(nativeDiagnostics.freeStorageBytes),
+    totalStorage: formatBytes(nativeDiagnostics.totalStorageBytes),
+    memory: nativeDiagnostics.memoryUsedBytes && nativeDiagnostics.memoryTotalBytes
+      ? `${formatBytes(nativeDiagnostics.memoryUsedBytes)} / ${formatBytes(nativeDiagnostics.memoryTotalBytes)}`
+      : deviceHealth.memory,
+    lastSuccessfulPlayback: nativeDiagnostics.lastSuccessfulPlaybackAt
+      ? new Date(nativeDiagnostics.lastSuccessfulPlaybackAt).toLocaleString()
+      : 'N/A'
   };
 
   return (
@@ -221,15 +253,38 @@ const ScreenDetails = () => {
         <div className="flex space-x-2">
             {/* Remote Commands Dropdown or Buttons */}
             <div className="flex gap-2">
-                <button 
-                    onClick={() => handleCommand('REBOOT')}
-                    disabled={commandLoading}
-                    className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
-                    title="Reboot Device"
-                >
-                    <Power size={18} className="mr-1" />
-                    Reboot
-                </button>
+                {isNativePlayer ? (
+                  <>
+                    <button 
+                        onClick={() => handleCommand('REBOOT_APP')}
+                        disabled={commandLoading}
+                        className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
+                        title="Restart Native App"
+                    >
+                        <Power size={18} className="mr-1" />
+                        Reboot App
+                    </button>
+                    <button 
+                        onClick={() => handleCommand('REBOOT_DEVICE')}
+                        disabled={commandLoading}
+                        className="flex items-center px-3 py-2 bg-red-100 text-red-800 rounded-lg hover:bg-red-200 disabled:opacity-50"
+                        title="Reboot Device"
+                    >
+                        <Power size={18} className="mr-1" />
+                        Reboot Device
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                      onClick={() => handleCommand('REBOOT')}
+                      disabled={commandLoading}
+                      className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
+                      title="Reboot Device"
+                  >
+                      <Power size={18} className="mr-1" />
+                      Reboot
+                  </button>
+                )}
                 <button 
                     onClick={() => handleCommand('RELOAD')}
                     disabled={commandLoading}
@@ -248,6 +303,17 @@ const ScreenDetails = () => {
                     <Camera size={18} className="mr-1" />
                     Snapshot
                 </button>
+                {isNativePlayer && (
+                  <button 
+                      onClick={() => handleCommand('EXPORT_SUPPORT_BUNDLE')}
+                      disabled={commandLoading}
+                      className="flex items-center px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 disabled:opacity-50"
+                      title="Export Support Bundle"
+                  >
+                      <Database size={18} className="mr-1" />
+                      Support Bundle
+                  </button>
+                )}
                  <button 
                     onClick={() => handleCommand('CLEAR_CACHE')}
                     disabled={commandLoading}
@@ -272,12 +338,21 @@ const ScreenDetails = () => {
       {/* Quick Actions Bar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-4 justify-end">
         <button 
-          onClick={() => handleCommand('REBOOT')}
+          onClick={() => handleCommand(isNativePlayer ? 'REBOOT_APP' : 'REBOOT')}
           disabled={commandLoading}
           className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
         >
-          <Power size={18} className="mr-2" /> Reboot Player
+          <Power size={18} className="mr-2" /> {isNativePlayer ? 'Reboot App' : 'Reboot Player'}
         </button>
+        {isNativePlayer && (
+          <button 
+            onClick={() => handleCommand('REBOOT_DEVICE')}
+            disabled={commandLoading}
+            className="flex items-center px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+          >
+            <Power size={18} className="mr-2" /> Reboot Device
+          </button>
+        )}
         <button 
           onClick={() => handleCommand('RELOAD')}
           disabled={commandLoading}
@@ -313,7 +388,8 @@ const ScreenDetails = () => {
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'playlists', label: 'Playlists' },
-            { id: 'settings', label: 'Screen Configuration' },
+            { id: 'settings', label: isNativePlayer ? 'Native Controls' : 'Screen Configuration' },
+            ...(isNativePlayer ? [{ id: 'manifest', label: 'Native Manifest' }] : []),
             { id: 'downloads', label: 'Downloads' },
             { id: 'snapshots', label: 'Snapshots' },
             { id: 'logs', label: 'Logs' }
@@ -364,7 +440,7 @@ const ScreenDetails = () => {
                <StatCard 
                  icon={Info} 
                  label="App Version" 
-                 value={screen.appVersion || telemetry.appVersion || 'Unknown'} 
+                 value={nativeDiagnostics.appVersion || screen.appVersion || telemetry.appVersion || 'Unknown'} 
                  subValue="Player Version"
                  color="text-cyan-600 bg-cyan-50"
                />
@@ -385,8 +461,8 @@ const ScreenDetails = () => {
                <StatCard 
                  icon={HardDrive} 
                  label="Storage" 
-                 value={deviceHealth.freeDisk} 
-                 subValue={`Total: ${deviceHealth.totalDisk}`}
+                 value={isNativePlayer ? nativeHealth.freeStorage : deviceHealth.freeDisk} 
+                 subValue={`Total: ${isNativePlayer ? nativeHealth.totalStorage : deviceHealth.totalDisk}`}
                  color="text-indigo-600 bg-indigo-50"
                />
                <StatCard 
@@ -399,7 +475,7 @@ const ScreenDetails = () => {
                <StatCard 
                  icon={Activity} 
                  label="Memory" 
-                 value={deviceHealth.memory} 
+                 value={isNativePlayer ? nativeHealth.memory : deviceHealth.memory} 
                  subValue={telemetry.memoryUsage ? `${telemetry.memoryUsage}% Used` : 'Usage'}
                  color="text-pink-600 bg-pink-50"
                />
@@ -410,7 +486,103 @@ const ScreenDetails = () => {
                  subValue="Core Temp"
                  color="text-yellow-600 bg-yellow-50"
                />
+               {isNativePlayer && (
+                 <>
+                   <StatCard
+                     icon={Shield}
+                     label="Device Owner"
+                     value={nativeDiagnostics.deviceOwnerState || 'UNKNOWN'}
+                     subValue={nativeDiagnostics.kioskEnabled ? 'Kiosk On' : 'Kiosk Off'}
+                     color="text-emerald-600 bg-emerald-50"
+                   />
+                   <StatCard
+                     icon={PlaySquare}
+                     label="Playback State"
+                     value={nativeDiagnostics.playbackState || 'UNKNOWN'}
+                     subValue={nativeDiagnostics.currentAssetId ? `Asset: ${String(nativeDiagnostics.currentAssetId).slice(0, 8)}...` : 'No active asset'}
+                     color="text-violet-600 bg-violet-50"
+                   />
+                   <StatCard
+                     icon={Download}
+                     label="Download State"
+                     value={nativeDiagnostics.downloadState || 'UNKNOWN'}
+                     subValue={nativeDiagnostics.cachedAssetCount != null ? `${nativeDiagnostics.cachedAssetCount} cached assets` : 'No cache report'}
+                     color="text-amber-600 bg-amber-50"
+                   />
+                   <StatCard
+                     icon={Clock}
+                     label="Last Good Playback"
+                     value={nativeHealth.lastSuccessfulPlayback}
+                     subValue={nativeDiagnostics.lastTelemetryAt ? `Telemetry: ${new Date(nativeDiagnostics.lastTelemetryAt).toLocaleString()}` : 'No telemetry'}
+                     color="text-sky-600 bg-sky-50"
+                   />
+                 </>
+               )}
             </div>
+
+            {isNativePlayer && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center mb-4">
+                    <Smartphone size={20} className="mr-2 text-gray-500" /> Native Diagnostics
+                  </h3>
+                  <div className="space-y-2 text-sm text-gray-700">
+                    <div>Platform: {nativeDiagnostics.platform || screen.playerType || 'Unknown'}</div>
+                    <div>Device: {nativeDiagnostics.device || 'Unknown'}</div>
+                    <div>Android: {nativeDiagnostics.androidVersion || 'Unknown'}</div>
+                    <div>Current Playlist: {nativeDiagnostics.currentPlaylistId || 'N/A'}</div>
+                    <div>Current Asset: {nativeDiagnostics.currentAssetId || 'N/A'}</div>
+                    <div>Queue Depth: {nativeDiagnostics.commandQueueDepth ?? pendingCommands.length}</div>
+                    <div>API Base: {nativeDiagnostics.apiBase || 'N/A'}</div>
+                  </div>
+                </div>
+                <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                  <h3 className="text-lg font-semibold text-gray-800 flex items-center mb-4">
+                    <AlertTriangle size={20} className="mr-2 text-gray-500" /> Error Signals
+                  </h3>
+                  <div className="space-y-3 text-sm">
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="font-medium text-gray-700">Playback Error</div>
+                      <div className="mt-1 text-gray-500">{nativeDiagnostics.playbackError || 'None reported'}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="font-medium text-gray-700">Decoder Error</div>
+                      <div className="mt-1 text-gray-500">{nativeDiagnostics.decoderError || 'None reported'}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="font-medium text-gray-700">Download Error</div>
+                      <div className="mt-1 text-gray-500">{nativeDiagnostics.lastDownloadError || 'None reported'}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="font-medium text-gray-700">Support Bundle</div>
+                      <div className="mt-1 text-gray-500">
+                        {nativeDiagnostics.supportBundle?.uploadedAt
+                          ? `Latest: ${new Date(nativeDiagnostics.supportBundle.uploadedAt).toLocaleString()}`
+                          : 'No support bundle uploaded yet'}
+                      </div>
+                      {nativeDiagnostics.supportBundle?.url && (
+                        <a
+                          href={nativeDiagnostics.supportBundle.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          Download {nativeDiagnostics.supportBundle.fileName || 'support bundle'}
+                        </a>
+                      )}
+                    </div>
+                    {nativeDiagnostics.lastCommand && (
+                      <div className="rounded-lg border border-gray-200 bg-white p-3">
+                        <div className="font-medium text-gray-700">Last Command</div>
+                        <div className="mt-1 text-gray-500">
+                          {nativeDiagnostics.lastCommand.type || 'Unknown'} / {nativeDiagnostics.lastCommand.status || 'Unknown'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Command Queue & Download Progress */}
             <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
@@ -453,38 +625,46 @@ const ScreenDetails = () => {
               )}
 
               {/* Download Progress Section */}
-              {telemetry.downloadProgress && telemetry.downloadProgress.status === 'DOWNLOADING' && (
+              {(nativeDiagnostics.downloadProgress || telemetry.downloadProgress) && (
                 <div className="mt-4 pt-4 border-t border-gray-200">
+                  {(() => {
+                    const progress = nativeDiagnostics.downloadProgress || telemetry.downloadProgress;
+                    if (!progress) return null;
+                    return (
+                      <>
                   <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center">
                     <Download size={16} className="mr-2 text-blue-500" /> 
                     File Sync Progress
-                    {telemetry.downloadProgress.status && (
+                    {progress.status && (
                        <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                         telemetry.downloadProgress.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
-                         telemetry.downloadProgress.status === 'ERROR' ? 'bg-red-100 text-red-700' :
+                         progress.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                         progress.status === 'ERROR' ? 'bg-red-100 text-red-700' :
                          'bg-blue-100 text-blue-700'
                        }`}>
-                         {telemetry.downloadProgress.status}
+                         {progress.status}
                        </span>
                     )}
                   </h4>
                   
-                  {telemetry.downloadProgress.status === 'DOWNLOADING' && (
+                  {progress.status === 'DOWNLOADING' && (
                     <>
                       <div className="bg-gray-200 rounded-full h-2.5 mb-2 overflow-hidden">
                         <div 
                           className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
-                          style={{ width: `${(telemetry.downloadProgress.completed / Math.max(telemetry.downloadProgress.total, 1)) * 100}%` }}
+                          style={{ width: `${((progress.completed || 0) / Math.max(progress.total || 1, 1)) * 100}%` }}
                         ></div>
                       </div>
                       <div className="flex justify-between text-xs text-gray-500">
                         <span className="truncate max-w-[200px]">
-                          {telemetry.downloadProgress.currentFile ? `Downloading: ${telemetry.downloadProgress.currentFile}` : 'Preparing...'}
+                          {progress.currentFile ? `Downloading: ${progress.currentFile}` : 'Preparing...'}
                         </span>
-                        <span>{telemetry.downloadProgress.completed} / {telemetry.downloadProgress.total}</span>
+                        <span>{progress.completed || 0} / {progress.total || 0}</span>
                       </div>
                     </>
                   )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -500,8 +680,15 @@ const ScreenDetails = () => {
 
         {activeTab === 'downloads' && (
           <div className="p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center justify-between">
+              <div className="flex items-center">
               <Download size={20} className="mr-2 text-gray-500" /> Cached Media Files
+              </div>
+              {isNativePlayer && (
+                <span className="text-sm font-normal text-gray-500">
+                  State: {nativeDiagnostics.downloadState || 'UNKNOWN'}
+                </span>
+              )}
             </h3>
             
             {telemetry.cachedFiles && telemetry.cachedFiles.length > 0 ? (
@@ -583,7 +770,7 @@ const ScreenDetails = () => {
         {/* Screen Settings */}
         {activeTab === 'settings' && (
           <div className="p-6 space-y-8">
-             {screen.playerType === 'Browser' ? (
+             {!isNativePlayer ? (
                 <div className="space-y-8">
                     {/* Display & Appearance */}
                     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -810,14 +997,88 @@ const ScreenDetails = () => {
                         </div>
 
                         <div className="mt-6 text-sm text-gray-600">
-                            <div>Device Owner: {telemetry.deviceOwner ? 'Yes' : 'No/Unknown'}</div>
-                            <div>Platform: {telemetry.platform || screen.playerType}</div>
-                            <div>Android: {telemetry.androidVersion || 'Unknown'}</div>
-                            <div>Device: {telemetry.device || 'Unknown'}</div>
+                            <div>Device Owner: {nativeDiagnostics.deviceOwnerState || 'Unknown'}</div>
+                            <div>Platform: {nativeDiagnostics.platform || screen.playerType}</div>
+                            <div>Android: {nativeDiagnostics.androidVersion || 'Unknown'}</div>
+                            <div>Device: {nativeDiagnostics.device || 'Unknown'}</div>
+                            <div>Playback: {nativeDiagnostics.playbackState || 'Unknown'}</div>
+                            <div>Download State: {nativeDiagnostics.downloadState || 'Unknown'}</div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                            <Settings className="mr-2" size={20} /> Recovery & Diagnostics
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                            <button
+                                onClick={() => sendAndroidCommand('ENTER_RECOVERY_MODE', { minutes: 15 })}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-yellow-50 text-yellow-700 hover:bg-yellow-100 disabled:opacity-50"
+                            >
+                                Enter Recovery Mode
+                            </button>
+                            <button
+                                onClick={() => sendAndroidCommand('CLEAR_RECOVERY_MODE')}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
+                            >
+                                Clear Recovery Mode
+                            </button>
+                            <button
+                                onClick={() => sendAndroidCommand('RESET_TECH_UNLOCK')}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                            >
+                                Reset Tech Unlock
+                            </button>
+                            <button
+                                onClick={() => sendAndroidCommand('CLEAR_HOME_LOCK')}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50"
+                            >
+                                Clear HOME Lock
+                            </button>
+                            <button
+                                onClick={() => sendAndroidCommand('REBOOT_APP')}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50"
+                            >
+                                Reboot App
+                            </button>
+                            <button
+                                onClick={() => sendAndroidCommand('REBOOT_DEVICE')}
+                                disabled={commandLoading}
+                                className="px-4 py-2 rounded-lg bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-50"
+                            >
+                                Reboot Device
+                            </button>
                         </div>
                     </div>
                 </div>
              )}
+          </div>
+        )}
+
+        {activeTab === 'manifest' && isNativePlayer && (
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <PackageSearch size={20} className="mr-2 text-gray-500" /> Native Playback Manifest
+              </h3>
+              <button
+                onClick={fetchNativeManifest}
+                disabled={manifestLoading}
+                className="flex items-center px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+              >
+                <RefreshCw size={16} className="mr-2" /> Refresh Manifest
+              </button>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-900 text-gray-100 overflow-hidden">
+              <pre className="p-4 text-xs overflow-x-auto whitespace-pre-wrap">
+                {manifestLoading ? 'Loading native manifest...' : JSON.stringify(nativeManifest || {}, null, 2)}
+              </pre>
+            </div>
           </div>
         )}
 
@@ -945,6 +1206,20 @@ const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, value, subValue,
     </div>
   </div>
 );
+
+const formatBytes = (value?: number | null) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'N/A';
+  }
+  const bytes = Number(value);
+  if (bytes <= 0) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const size = bytes / 1024 ** exponent;
+  return `${size.toFixed(size >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+};
 
 interface PlaylistSelectorProps {
   currentPlaylistId?: string;

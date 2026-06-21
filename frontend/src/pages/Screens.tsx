@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { Link, useNavigate } from 'react-router-dom';
-import { Monitor, Wifi, WifiOff, Plus, Camera, Pencil, Trash2, ExternalLink, Settings as SettingsIcon, Search, Filter, PlayCircle, LayoutList, Map as MapIcon } from 'lucide-react';
+import { Monitor, Wifi, WifiOff, Plus, Camera, Pencil, Trash2, Settings as SettingsIcon, Search, Filter, PlayCircle, LayoutList, Map as MapIcon, Smartphone, Shield, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import SearchableSelect from '../components/SearchableSelect';
 import AddScreenModal from '../components/AddScreenModal';
@@ -11,6 +11,15 @@ import ScreenMap from '../components/ScreenMap';
 import PermissionGuard from '../components/PermissionGuard';
 import { Screen } from '../services/screen';
 import { getTenantSettings } from '../services/tenant';
+
+type ScreenSummary = {
+  total: number;
+  online: number;
+  offline: number;
+  native: number;
+  deviceOwner: number;
+  downloading: number;
+};
 
 const Screens = () => {
   const { token } = useAuth();
@@ -35,32 +44,57 @@ const Screens = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showDeleted, setShowDeleted] = useState(false);
-
-  const filteredScreens = screens.filter(screen => {
-    const matchesSearch = screen.name.toLowerCase().includes(searchQuery.toLowerCase());
-    let matchesStatus = true;
-    
-    if (showDeleted) {
-       // When showing deleted, statusFilter is ignored or we only show deleted
-       matchesStatus = true;
-    } else {
-        matchesStatus = statusFilter === 'all' 
-          ? true 
-          : statusFilter === 'online' 
-            ? screen.status === 'ONLINE' 
-            : screen.status !== 'ONLINE';
-    }
-    
-    return matchesSearch && matchesStatus;
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(25);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState<ScreenSummary>({
+    total: 0,
+    online: 0,
+    offline: 0,
+    native: 0,
+    deviceOwner: 0,
+    downloading: 0,
   });
+
+  const filteredScreens = screens;
 
   const fetchScreens = async () => {
     try {
       setError(null);
       const res = await api.get('/screens', {
-        params: { deleted: showDeleted }
+        params: {
+          deleted: showDeleted,
+          page,
+          pageSize,
+          search: searchQuery || undefined,
+          status: showDeleted
+            ? 'DELETED'
+            : statusFilter === 'all'
+              ? undefined
+              : statusFilter === 'online'
+                ? 'ONLINE'
+                : 'OFFLINE'
+        }
       });
-      setScreens(res.data);
+      const payload = res.data;
+      if (payload.items && payload.pagination) {
+        setScreens(payload.items);
+        setTotalPages(payload.pagination.totalPages || 1);
+        if (payload.summary) {
+          setStats(payload.summary);
+        }
+      } else {
+        setScreens(payload);
+        setTotalPages(1);
+        setStats({
+          total: payload.length,
+          online: payload.filter((s: Screen) => s.status === 'ONLINE').length,
+          offline: payload.filter((s: Screen) => s.status !== 'ONLINE').length,
+          native: payload.filter((s: Screen) => s.nativeDiagnostics?.isNativePlayer || s.playerType === 'Android').length,
+          deviceOwner: payload.filter((s: Screen) => s.nativeDiagnostics?.deviceOwnerState === 'DEVICE_OWNER').length,
+          downloading: payload.filter((s: Screen) => s.nativeDiagnostics?.downloadState === 'DOWNLOADING').length
+        });
+      }
     } catch (err: any) {
       console.error('Failed to fetch screens', err);
       setError(err.response?.data?.message || 'Failed to load screens');
@@ -71,7 +105,7 @@ const Screens = () => {
 
   useEffect(() => {
     fetchScreens();
-  }, [showDeleted, token]); // Re-fetch when showDeleted changes
+  }, [showDeleted, token, page, pageSize, searchQuery, statusFilter]); // Re-fetch when query changes
 
   useEffect(() => {
     // Refresh list every 30s to update status (only if not showing deleted)
@@ -79,7 +113,11 @@ const Screens = () => {
 
     const interval = setInterval(fetchScreens, 30000);
     return () => clearInterval(interval);
-  }, [token, showDeleted]);
+  }, [token, showDeleted, page, pageSize, searchQuery, statusFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [showDeleted, searchQuery, statusFilter]);
 
   useEffect(() => {
     // Fetch tenant settings for API key
@@ -125,12 +163,6 @@ const Screens = () => {
       console.error('Failed to request snapshot', err);
       alert('Failed to request snapshot');
     }
-  };
-
-  const stats = {
-    total: screens.length,
-    online: screens.filter(s => s.status === 'ONLINE').length,
-    offline: screens.filter(s => s.status !== 'ONLINE').length
   };
 
   return (
@@ -186,7 +218,7 @@ const Screens = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
           <div className="p-3 bg-blue-50 text-blue-600 rounded-lg mr-4">
             <Monitor size={24} />
@@ -212,6 +244,33 @@ const Screens = () => {
           <div>
             <p className="text-sm text-gray-500 font-medium">Offline Screens</p>
             <p className="text-2xl font-bold text-gray-800">{stats.offline}</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
+          <div className="p-3 bg-purple-50 text-purple-600 rounded-lg mr-4">
+            <Smartphone size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Native Players</p>
+            <p className="text-2xl font-bold text-gray-800">{stats.native}</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg mr-4">
+            <Shield size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Device Owner</p>
+            <p className="text-2xl font-bold text-gray-800">{stats.deviceOwner}</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg mr-4">
+            <Download size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Active Downloads</p>
+            <p className="text-2xl font-bold text-gray-800">{stats.downloading}</p>
           </div>
         </div>
       </div>
@@ -345,7 +404,12 @@ const Screens = () => {
                       )}
                     </td>
                     <td className="px-6 py-4 text-gray-600 text-sm">
-                      {screen.playerType || 'Browser'}
+                      <div>{screen.playerType || 'Browser'}</div>
+                      {screen.nativeDiagnostics?.isNativePlayer && (
+                        <div className="mt-1 text-xs text-gray-500">
+                          {screen.nativeDiagnostics.platform || 'native'} {screen.nativeDiagnostics.deviceOwnerState === 'DEVICE_OWNER' ? '• DO' : ''}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-gray-600 text-sm">
                       {screen.activePlaylist ? (
@@ -368,6 +432,11 @@ const Screens = () => {
                     </td>
                     <td className="px-6 py-4 text-gray-600 text-sm">
                       {screen.lastSeenAt ? new Date(screen.lastSeenAt).toLocaleString('en-GB') : 'Never'}
+                      {screen.nativeDiagnostics?.isNativePlayer && !showDeleted && (
+                        <div className="mt-1 text-xs text-gray-500">
+                          {screen.nativeDiagnostics.playbackState || 'UNKNOWN'} / {screen.nativeDiagnostics.downloadState || 'UNKNOWN'}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-gray-600 text-sm">
                       {new Date(screen.createdAt).toLocaleString('en-GB')}
@@ -417,6 +486,27 @@ const Screens = () => {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between border-t border-gray-100 px-6 py-4">
+            <div className="text-sm text-gray-500">
+              Page {page} of {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       )}

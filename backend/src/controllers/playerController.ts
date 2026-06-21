@@ -78,6 +78,19 @@ export const heartbeat = async (req: Request, res: Response) => {
   }
 };
 
+export const getNativeManifest = async (req: Request, res: Response) => {
+  try {
+    const screenId = (req as any).user.id;
+    const manifest = await screenService.getNativePlaybackManifest(screenId);
+    res.status(200).json(manifest);
+  } catch (error: any) {
+    if (error.message === 'Screen not found' || error.code === 'P2025') {
+      return res.status(401).json({ message: 'Screen not found or deleted' });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
 export const submitProofOfPlay = async (req: Request, res: Response) => {
   try {
     const screenId = (req as any).user.id;
@@ -269,6 +282,98 @@ export const uploadSnapshot = async (req: Request, res: Response) => {
             });
         }
     } catch (e) { console.error('Failed to log snapshot error', e); }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const uploadSupportBundle = async (req: Request, res: Response) => {
+  try {
+    const screenId = (req as any).user.id;
+    if (!req.file) {
+      return res.status(400).json({ message: 'No support bundle uploaded' });
+    }
+
+    const systemSettings = await systemSettingsService.getSystemSettings();
+    const settings = systemSettings?.storage as unknown as StorageSettings | undefined;
+    const isS3 = settings?.provider === 's3';
+    let fileUrl = '';
+
+    if (isS3 && settings?.bucket) {
+      const s3Client = new S3Client({
+        region: settings.region,
+        credentials: {
+          accessKeyId: settings.accessKeyId || '',
+          secretAccessKey: settings.secretAccessKey || '',
+        },
+        endpoint: settings.endpoint || undefined,
+        forcePathStyle: !!settings.endpoint,
+      });
+
+      const fileStream = fs.createReadStream(req.file.path);
+      const uploadDir = path.join(__dirname, '../../uploads');
+      const relativePath = path.relative(uploadDir, req.file.destination).split(path.sep).join('/');
+      const key = `support-bundles/${relativePath}/${req.file.filename}`;
+
+      const upload = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: settings.bucket,
+          Key: key,
+          Body: fileStream,
+          ContentType: req.file.mimetype,
+        },
+      });
+      await upload.done();
+      fileUrl = settings.endpoint
+        ? `${settings.endpoint}/${settings.bucket}/${key}`
+        : `https://${settings.bucket}.s3.${settings.region}.amazonaws.com/${key}`;
+      fs.unlinkSync(req.file.path);
+    } else {
+      const uploadDir = path.join(__dirname, '../../uploads');
+      const relativePath = path.relative(uploadDir, req.file.destination).split(path.sep).join('/');
+      const prefix = relativePath && relativePath !== '.' ? `${relativePath}/` : '';
+      fileUrl = `/uploads/${prefix}${req.file.filename}`;
+    }
+
+    const screen = await prisma.screen.findUnique({ where: { id: screenId } });
+    const config = (screen?.config as any) || {};
+    await prisma.screen.update({
+      where: { id: screenId },
+      data: {
+        config: {
+          ...config,
+          supportBundle: {
+            fileName: req.file.originalname || req.file.filename,
+            storedFileName: req.file.filename,
+            contentType: req.file.mimetype,
+            sizeBytes: req.file.size,
+            url: fileUrl,
+            uploadedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+
+    await prisma.screenLog.create({
+      data: {
+        screenId,
+        level: 'INFO',
+        message: `Support bundle received from player (${req.file.originalname || req.file.filename})`
+      }
+    });
+
+    res.status(200).json({ message: 'Support bundle uploaded', url: fileUrl });
+  } catch (error: any) {
+    try {
+      const screenId = (req as any).user?.id;
+      if (screenId) {
+        await prisma.screenLog.create({
+          data: { screenId, level: 'ERROR', message: `Support bundle error: ${error.message}` }
+        });
+      }
+    } catch (logError) {
+      console.error('Failed to log support bundle error', logError);
+    }
     res.status(500).json({ message: error.message });
   }
 };

@@ -1,6 +1,7 @@
 import express from 'express';
 import * as screenController from '../controllers/screenController';
 import { authenticate, authorize, checkPermission } from '../middleware/auth';
+import { commandLimiter } from '../middleware/rateLimit';
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ const router = express.Router();
 // CMS routes (Protected)
 router.get('/', authenticate, checkPermission('screen:read'), screenController.getScreens);
 router.get('/:id', authenticate, checkPermission('screen:read'), screenController.getScreen);
+router.get('/:id/native-manifest', authenticate, checkPermission('screen:read'), screenController.getNativeManifest);
 router.get('/:id/logs/export', authenticate, checkPermission('screen:read'), screenController.exportLogs);
 
 router.post('/', authenticate, checkPermission('screen:write'), screenController.pairScreen);
@@ -20,10 +22,10 @@ router.put('/:id', authenticate, checkPermission('screen:write'), screenControll
 router.delete('/:id', authenticate, checkPermission('screen:delete'), screenController.deleteScreen);
 
 // Actions
-router.post('/:id/publish', authenticate, checkPermission('screen:publish'), screenController.publishPlaylist);
-router.post('/:id/snapshot', authenticate, checkPermission('screen:write'), screenController.requestSnapshot);
-router.post('/:id/command', authenticate, checkPermission('screen:write'), screenController.sendCommand);
-router.post('/:id/reset', authenticate, checkPermission('screen:write'), screenController.resetScreenContent);
-router.post('/:id/commands/clear', authenticate, checkPermission('screen:write'), screenController.clearCommandHistory);
+router.post('/:id/publish', authenticate, commandLimiter, checkPermission('screen:publish'), screenController.publishPlaylist);
+router.post('/:id/snapshot', authenticate, commandLimiter, checkPermission('screen:write'), screenController.requestSnapshot);
+router.post('/:id/command', authenticate, commandLimiter, checkPermission('screen:write'), screenController.sendCommand);
+router.post('/:id/reset', authenticate, commandLimiter, checkPermission('screen:write'), screenController.resetScreenContent);
+router.post('/:id/commands/clear', authenticate, commandLimiter, checkPermission('screen:write'), screenController.clearCommandHistory);
 
 export default router;

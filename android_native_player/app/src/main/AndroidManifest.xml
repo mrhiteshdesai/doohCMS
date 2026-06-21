@@ -6,9 +6,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:allowBackup="true"
+        android:name=".SmartagsApp"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@android:drawable/sym_def_app_icon"
@@ -23,6 +25,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
             android:lockTaskMode="if_whitelisted"
             android:theme="@style/Theme.SmartagsPlayer.Fullscreen">
             <intent-filter>
@@ -54,9 +57,20 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".KioskWatchdogReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".KioskRestartReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <receiver
             android:name=".SmartagsDeviceAdminReceiver"
@@ -67,8 +81,15 @@
                 android:resource="@xml/device_admin_receiver" />
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".KioskGuardianService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="false" />
     </application>
 
 </manifest>

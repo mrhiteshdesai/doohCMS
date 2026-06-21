@@ -1,10 +1,20 @@
 import { Request, Response } from 'express';
 import * as mediaService from '../services/mediaService';
 import * as systemSettingsService from '../services/systemSettingsService';
+import crypto from 'crypto';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import path from 'path';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+interface CdnSettings {
+    enabled: boolean;
+    baseUrl: string;
+}
 
 interface StorageSettings {
     provider: string;
@@ -27,6 +37,7 @@ export const uploadFiles = async (req: Request, res: Response) => {
     // Get System Settings to check storage provider
     const systemSettings = await systemSettingsService.getSystemSettings();
     const settings = systemSettings?.storage as unknown as StorageSettings | undefined;
+    const cdnSettings = systemSettings?.cdn as unknown as CdnSettings | undefined;
     const isS3 = settings?.provider === 's3';
 
     let s3Client: S3Client | null = null;
@@ -65,6 +76,7 @@ export const uploadFiles = async (req: Request, res: Response) => {
 
     for (const file of files) {
       let url = '';
+      const sha256 = await computeSha256FromFile(file.path);
       
       if (isS3 && s3Client && settings?.bucket) {
           // Upload to S3
@@ -90,7 +102,10 @@ export const uploadFiles = async (req: Request, res: Response) => {
               await upload.done();
               
               // Construct S3 URL
-              if (settings.endpoint) {
+              if (cdnSettings?.enabled && cdnSettings?.baseUrl) {
+                  const baseUrl = cdnSettings.baseUrl.replace(/\/$/, '');
+                  url = `${baseUrl}/${key}`;
+              } else if (settings.endpoint) {
                    url = `${settings.endpoint}/${settings.bucket}/${key}`;
               } else {
                    url = `https://${settings.bucket}.s3.${settings.region}.amazonaws.com/${key}`;
@@ -120,6 +135,7 @@ export const uploadFiles = async (req: Request, res: Response) => {
         name: file.originalname,
         size: file.size,
         mimeType: file.mimetype,
+        sha256,
         url: url,
         folderId: req.body.folderId || undefined,
         width: meta.width,
@@ -135,6 +151,174 @@ export const uploadFiles = async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }
+};
+
+export const getPresignedUrl = async (req: Request, res: Response) => {
+  try {
+    const { filename, contentType } = req.body;
+    const { tenantId } = (req as any).user;
+    
+    const systemSettings = await systemSettingsService.getSystemSettings();
+    const settings = systemSettings?.storage as unknown as StorageSettings | undefined;
+
+    if (!settings || settings.provider !== 's3') {
+      return res.status(400).json({ message: 'S3 storage is not configured' });
+    }
+
+    const s3Client = new S3Client({
+      region: settings.region,
+      credentials: {
+        accessKeyId: settings.accessKeyId || '',
+        secretAccessKey: settings.secretAccessKey || '',
+      },
+      endpoint: settings.endpoint || undefined,
+      forcePathStyle: !!settings.endpoint,
+    });
+
+    const relativePath = `${tenantId}/${new Date().getFullYear()}/${(new Date().getMonth()+1).toString().padStart(2, '0')}/${new Date().getDate().toString().padStart(2, '0')}`;
+    const key = `uploads/${relativePath}/${Date.now()}-${filename}`;
+
+    const command = new PutObjectCommand({
+      Bucket: settings.bucket,
+      Key: key,
+      ContentType: contentType,
+    });
+
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+    res.json({ 
+      uploadUrl: url, 
+      key,
+      publicUrl: settings.endpoint 
+        ? `${settings.endpoint}/${settings.bucket}/${key}`
+        : `https://${settings.bucket}.s3.${settings.region}.amazonaws.com/${key}`
+    });
+  } catch (error: any) {
+    console.error('Presigned URL Error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const registerFile = async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).user;
+    const { key, filename, size, mimeType, folderId, metadata, sha256: inputSha256 } = req.body;
+
+    const systemSettings = await systemSettingsService.getSystemSettings();
+    const settings = systemSettings?.storage as unknown as StorageSettings | undefined;
+    const cdnSettings = systemSettings?.cdn as unknown as CdnSettings | undefined;
+
+    let url = '';
+    if (cdnSettings?.enabled && cdnSettings?.baseUrl) {
+        const baseUrl = cdnSettings.baseUrl.replace(/\/$/, '');
+        url = `${baseUrl}/${key}`;
+    } else if (settings?.endpoint) {
+         url = `${settings.endpoint}/${settings.bucket}/${key}`;
+    } else if (settings?.bucket) {
+         url = `https://${settings.bucket}.s3.${settings.region}.amazonaws.com/${key}`;
+    } else {
+        return res.status(400).json({ message: 'Storage configuration missing' });
+    }
+
+    let sha256 = normalizeSha256(inputSha256) || normalizeSha256(metadata?.sha256);
+    if (!sha256) {
+      if (settings?.provider === 's3' && settings.bucket && key) {
+        const s3Client = new S3Client({
+          region: settings.region,
+          credentials: {
+            accessKeyId: settings.accessKeyId || '',
+            secretAccessKey: settings.secretAccessKey || '',
+          },
+          endpoint: settings.endpoint || undefined,
+          forcePathStyle: !!settings.endpoint,
+        });
+        sha256 = await computeSha256FromS3Object(s3Client, settings.bucket, key);
+      } else {
+        sha256 = await computeSha256FromUrl(url);
+      }
+    }
+
+    const fileData = {
+        name: filename,
+        size,
+        mimeType,
+        sha256,
+        url,
+        folderId: folderId || undefined,
+        width: metadata?.width,
+        height: metadata?.height,
+        duration: metadata?.duration
+    };
+
+    const savedFile = await mediaService.createFile(tenantId, fileData);
+    res.status(201).json(savedFile);
+  } catch (error: any) {
+    console.error('Register File Error:', error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const normalizeSha256 = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : undefined;
+};
+
+const computeSha256FromFile = async (filePath: string): Promise<string> => {
+  return await new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+};
+
+const computeSha256FromReadable = async (stream: NodeJS.ReadableStream): Promise<string> => {
+  return await new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+};
+
+const computeSha256FromS3Object = async (client: S3Client, bucket: string, key: string): Promise<string> => {
+  const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const body = response.Body;
+  if (!body || typeof (body as any).on !== 'function') {
+    throw new Error('Unable to read uploaded object for checksum');
+  }
+  return await computeSha256FromReadable(body as NodeJS.ReadableStream);
+};
+
+const computeSha256FromUrl = async (url: string, redirectsLeft: number = 3): Promise<string> => {
+  return await new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === 'http:' ? http : https;
+
+    const request = client.get(target, response => {
+      const status = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (status in { 301: 1, 302: 1, 303: 1, 307: 1, 308: 1 } && location && redirectsLeft > 0) {
+        response.resume();
+        const nextUrl = new URL(location, target).toString();
+        computeSha256FromUrl(nextUrl, redirectsLeft - 1).then(resolve).catch(reject);
+        return;
+      }
+
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`Failed to fetch uploaded file for checksum: HTTP ${status}`));
+        return;
+      }
+
+      computeSha256FromReadable(response).then(resolve).catch(reject);
+    });
+
+    request.on('error', reject);
+  });
 };
 
 export const createFolder = async (req: Request, res: Response) => {

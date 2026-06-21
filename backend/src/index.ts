@@ -1,13 +1,9 @@
-import dotenv from 'dotenv';
 import app from './app';
 import prisma from './prisma';
+import { appEnv } from './config/env';
 
 import { startCleanupJob } from './jobs/logCleanup';
 import { startStatusCheckJob } from './jobs/screenStatus';
-
-dotenv.config();
-
-const PORT = process.env.PORT || 3000;
 
 async function main() {
   try {
@@ -19,8 +15,8 @@ async function main() {
     startCleanupJob();
     startStatusCheckJob();
 
-    const server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+    const server = app.listen(appEnv.PORT, () => {
+      console.log(`Server running on port ${appEnv.PORT} in ${appEnv.NODE_ENV} mode`);
     });
     
     // Increase timeout to 10 minutes for large uploads

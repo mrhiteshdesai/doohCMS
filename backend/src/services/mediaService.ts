@@ -91,19 +91,20 @@ export const deleteFolder = async (folderId: string, tenantId: string) => {
 };
 
 export const createFile = async (tenantId: string, data: any) => {
-  const { name, url, mimeType, size, folderId, width, height, duration } = data;
+  const { name, url, mimeType, sha256, size, folderId, width, height, duration } = data;
   return await prisma.mediaFile.create({
     data: {
       name,
       url,
       mimeType,
+      sha256,
       size,
       folderId,
       width,
       height,
       duration,
       tenantId,
-    },
+    } as any,
   });
 };
 

@@ -10,9 +10,11 @@ coverage/
 *.sqlite
 *.db
 android/local.properties
+android/.gradle/
 android_native_player/local.properties
 android_native_player/.gradle/
 android_native_player/**/build/
+android_native_player/build-support/
 
 # Backend specific
 backend/node_modules/
@@ -43,3 +45,12 @@ frontend/final_installer/
 frontend/final_installer2/
 *.exe
 ~$*
+temp_*.ts
+apply_backend_fixes.js
+backend/check_*.js
+backend/create_shadow.js
+backend/enable_extension.js
+backend/convert_to_hypertables.js
+backend/list_tables.js
+backend/test_db.js
+backend/test_prisma_connect.ts

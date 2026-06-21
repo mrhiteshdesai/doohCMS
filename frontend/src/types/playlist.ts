@@ -22,6 +22,11 @@ export interface ZoneItem {
   media?: MediaFile;
   order: number;
   duration: number;
+  startDate?: Date;
+  endDate?: Date;
+  startTime?: string;
+  endTime?: string;
+  daysOfWeek?: string;
   widget?: {
     widgetId?: string;
     id: string;

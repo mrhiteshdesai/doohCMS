@@ -5,11 +5,13 @@ import { SystemSettings as ISystemSettings } from '../../services/systemSettings
 interface Props {
   settings: TenantSettings;
   systemSettings?: ISystemSettings;
+  retentionPolicies?: Record<string, number>;
   onChange: (key: string, value: any) => void;
   onSystemChange?: (key: string, value: any) => void;
+  onRetentionChange?: (table: string, days: number) => void;
 }
 
-const StorageSettings: React.FC<Props> = ({ settings, systemSettings, onChange, onSystemChange }) => {
+const StorageSettings: React.FC<Props> = ({ settings, systemSettings, retentionPolicies, onChange, onSystemChange, onRetentionChange }) => {
   const isS3 = systemSettings?.storage.provider === 's3';
 
   return (
@@ -74,7 +76,7 @@ const StorageSettings: React.FC<Props> = ({ settings, systemSettings, onChange, 
                             type="password"
                             value={systemSettings.storage.accessKeyId || ''}
                             onChange={(e) => onSystemChange('accessKeyId', e.target.value)}
-                            placeholder={systemSettings.storage.accessKeyId ? '********' : ''}
+                            placeholder={systemSettings.storage.hasAccessKeyId ? '********' : ''}
                             className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
                         />
                     </div>
@@ -84,12 +86,108 @@ const StorageSettings: React.FC<Props> = ({ settings, systemSettings, onChange, 
                             type="password"
                             value={systemSettings.storage.secretAccessKey || ''}
                             onChange={(e) => onSystemChange('secretAccessKey', e.target.value)}
-                            placeholder={systemSettings.storage.secretAccessKey ? '********' : ''}
+                            placeholder={systemSettings.storage.hasSecretAccessKey ? '********' : ''}
                             className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
                         />
                     </div>
                  </div>
              )}
+             {/* CDN Settings */}
+             <div className="mt-6 pt-6 border-t border-gray-200">
+                <h4 className="text-md font-medium text-gray-900 mb-4">Content Delivery Network (CDN)</h4>
+                <div className="flex items-start">
+                    <div className="flex items-center h-5">
+                        <input
+                            id="cdnEnabled"
+                            type="checkbox"
+                            checked={systemSettings.cdn?.enabled || false}
+                            onChange={(e) => onSystemChange('cdn', { ...systemSettings.cdn, enabled: e.target.checked })}
+                            className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        />
+                    </div>
+                    <div className="ml-3 text-sm">
+                        <label htmlFor="cdnEnabled" className="font-medium text-gray-700">Enable CDN</label>
+                        <p className="text-gray-500">Serve media files via a CDN for better performance.</p>
+                    </div>
+                </div>
+                
+                {systemSettings.cdn?.enabled && (
+                    <div className="mt-4">
+                        <label className="block text-sm font-medium text-gray-700">CDN Base URL</label>
+                        <input
+                            type="text"
+                            value={systemSettings.cdn?.baseUrl || ''}
+                            onChange={(e) => onSystemChange('cdn', { ...systemSettings.cdn, baseUrl: e.target.value })}
+                            className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                            placeholder="https://cdn.example.com"
+                        />
+                    </div>
+                )}
+             </div>
+
+             {/* Traffic Shaping */}
+             <div className="mt-6 pt-6 border-t border-gray-200">
+                <h4 className="text-md font-medium text-gray-900 mb-4">Traffic Shaping</h4>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Download Jitter (Seconds)</label>
+                    <input
+                        type="number"
+                        min="0"
+                        value={systemSettings.traffic?.downloadJitter || 0}
+                        onChange={(e) => onSystemChange('traffic', { ...systemSettings.traffic, downloadJitter: parseInt(e.target.value) || 0 })}
+                        className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                        Random delay added to media downloads to prevent "Thundering Herd" issues when many screens update simultaneously.
+                    </p>
+                </div>
+             </div>
+
+            {/* Data Retention Policies */}
+            {retentionPolicies && onRetentionChange && (
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-md font-medium text-gray-900 mb-4">Data Retention Policies (Automation)</h4>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Configure how long the system keeps historical data. Older data will be automatically deleted.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-2">
+                        <div className="col-span-2 sm:col-span-1">
+                            <label className="block text-sm font-medium text-gray-700">Screen Logs Retention (Days)</label>
+                            <div className="mt-1 relative rounded-md shadow-sm">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={retentionPolicies['ScreenLog'] || 30}
+                                    onChange={(e) => onRetentionChange('ScreenLog', parseInt(e.target.value) || 0)}
+                                    className="focus:ring-blue-500 focus:border-blue-500 block w-full pr-12 sm:text-sm border-gray-300 rounded-md"
+                                />
+                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                    <span className="text-gray-500 sm:text-sm">days</span>
+                                </div>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">Default: 30 days</p>
+                        </div>
+
+                        <div className="col-span-2 sm:col-span-1">
+                            <label className="block text-sm font-medium text-gray-700">Proof of Play Retention (Days)</label>
+                            <div className="mt-1 relative rounded-md shadow-sm">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={retentionPolicies['ProofOfPlay'] || 90}
+                                    onChange={(e) => onRetentionChange('ProofOfPlay', parseInt(e.target.value) || 0)}
+                                    className="focus:ring-blue-500 focus:border-blue-500 block w-full pr-12 sm:text-sm border-gray-300 rounded-md"
+                                />
+                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                    <span className="text-gray-500 sm:text-sm">days</span>
+                                </div>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">Default: 90 days</p>
+                        </div>
+                    </div>
+                </div>
+            )}
           </div>
         </div>
       )}
@@ -97,7 +195,7 @@ const StorageSettings: React.FC<Props> = ({ settings, systemSettings, onChange, 
       {/* Tenant S3 Configuration (Legacy/Fallback or Bring Your Own Storage) */}
       {!systemSettings && (
          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-           <h3 className="text-lg font-medium text-gray-900 mb-4">Storage Settings</h3>
+           <h3 className="text-lg font-medium text-gray-900 mb-4">Tenant Storage Settings</h3>
            <p className="text-sm text-gray-500 mb-4">
              Configure your storage preferences. If System Settings are available, those will take precedence.
            </p>

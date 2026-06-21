@@ -1,6 +1,40 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def releaseStoreFile = keystoreProperties.getProperty('storeFile') ?: System.getenv('SMARTAGS_RELEASE_STORE_FILE')
+def releaseStorePassword = keystoreProperties.getProperty('storePassword') ?: System.getenv('SMARTAGS_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = keystoreProperties.getProperty('keyAlias') ?: System.getenv('SMARTAGS_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = keystoreProperties.getProperty('keyPassword') ?: System.getenv('SMARTAGS_RELEASE_KEY_PASSWORD')
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def requestedTasks = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def releasePackagingTasks = ['assemblerelease', 'bundlerelease', 'packagerelease', 'installrelease']
+def requiresReleaseSigning = requestedTasks.any { taskName ->
+    releasePackagingTasks.any { releaseTask -> taskName.contains(releaseTask) }
+}
+def resolvedVersionCode = (findProperty('SMARTAGS_VERSION_CODE')
+    ?: System.getenv('SMARTAGS_VERSION_CODE')
+    ?: '1').toString().toInteger()
+def resolvedVersionName = (findProperty('SMARTAGS_VERSION_NAME')
+    ?: System.getenv('SMARTAGS_VERSION_NAME')
+    ?: '1.0.0').toString()
+
+if (requiresReleaseSigning && !hasReleaseSigning) {
+    throw new GradleException(
+        "Release signing is required for release builds. Provide android_native_player/keystore.properties " +
+            "or set SMARTAGS_RELEASE_STORE_FILE, SMARTAGS_RELEASE_STORE_PASSWORD, " +
+            "SMARTAGS_RELEASE_KEY_ALIAS, and SMARTAGS_RELEASE_KEY_PASSWORD."
+    )
 }
 
 android {
@@ -11,15 +45,27 @@ android {
         applicationId "com.smartags.tvplayer"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -29,6 +75,13 @@ android {
     }
     kotlinOptions {
         jvmTarget = '1.8'
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def safeVersionName = variant.versionName.replaceAll(/[^0-9A-Za-z._-]/, "_")
+            outputFileName = "smartags-tvplayer-${variant.name}-v${safeVersionName}-${variant.versionCode}.apk"
+        }
     }
 }
 
@@ -41,7 +94,9 @@ dependencies {
     implementation 'androidx.media3:media3-ui:1.4.1'
     implementation 'androidx.media3:media3-datasource-okhttp:1.4.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.zxing:core:3.5.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'

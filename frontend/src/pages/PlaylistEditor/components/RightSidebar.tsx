@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Zone, MediaFile, ZoneItem } from '../../../types/playlist';
-import { Trash2, Move, Clock, Film, Image as ImageIcon, Puzzle } from 'lucide-react';
+import { Trash2, Move, Clock, Film, Image as ImageIcon, Puzzle, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -13,7 +13,7 @@ interface RightSidebarProps {
   onDeleteZone: (id: string) => void;
 }
 
-const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneItem, onDelete: () => void, onDurationChange: (val: number) => void }) => {
+const SortableSlideItem = ({ item, onDelete, onUpdate }: { item: ZoneItem, onDelete: () => void, onUpdate: (updates: Partial<ZoneItem>) => void }) => {
   const {
     attributes,
     listeners,
@@ -21,6 +21,8 @@ const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneIte
     transform,
     transition,
   } = useSortable({ id: item.id });
+  
+  const [showSchedule, setShowSchedule] = useState(false);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -28,6 +30,21 @@ const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneIte
   };
 
   const isWidget = !!item.widget && !item.media;
+
+  // Helpers for days of week
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const selectedDays = item.daysOfWeek ? item.daysOfWeek.split(',').map(Number) : [0, 1, 2, 3, 4, 5, 6];
+
+  const toggleDay = (dayIndex: number) => {
+    let newDays = [...selectedDays];
+    if (newDays.includes(dayIndex)) {
+      newDays = newDays.filter(d => d !== dayIndex);
+    } else {
+      newDays.push(dayIndex);
+    }
+    onUpdate({ daysOfWeek: newDays.sort().join(',') });
+  };
+
   return (
     <div ref={setNodeRef} style={style} className="bg-white p-3 rounded border shadow-sm mb-2 group">
       <div className="flex gap-3">
@@ -47,9 +64,6 @@ const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneIte
                 <span className="text-xs text-gray-500">{item.widget?.type}</span>
               </div>
             </div>
-            <button onClick={onDelete} className="text-gray-400 hover:text-red-500 self-start">
-              <Trash2 size={16} />
-            </button>
           </>
         ) : (
           <>
@@ -69,30 +83,97 @@ const SortableSlideItem = ({ item, onDelete, onDurationChange }: { item: ZoneIte
                 <span className="text-xs text-gray-500">{item.media?.type || ''}</span>
               </div>
             </div>
-            <button onClick={onDelete} className="text-gray-400 hover:text-red-500 self-start">
-              <Trash2 size={16} />
-            </button>
           </>
         )}
+        <div className="flex flex-col gap-1">
+            <button onClick={() => setShowSchedule(!showSchedule)} className={`p-1 rounded hover:bg-gray-100 ${showSchedule || item.startDate || item.startTime ? 'text-blue-500' : 'text-gray-400'}`}>
+                <Calendar size={16} />
+            </button>
+            <button onClick={onDelete} className="text-gray-400 hover:text-red-500">
+              <Trash2 size={16} />
+            </button>
+        </div>
       </div>
-      <div className="mt-2 flex items-center gap-2 text-sm border-t pt-2">
-        <Clock size={14} className="text-gray-400" />
-        <span className="text-gray-600 text-xs">Duration:</span>
-        {!isWidget && item.media && item.media.type === 'VIDEO' ? (
-          <span className="text-gray-500 text-xs italic">{item.duration}s (Auto)</span>
-        ) : (
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={item.duration}
-              onChange={(e) => onDurationChange(parseInt(e.target.value) || 5)}
-              className="w-16 px-1 py-0.5 border rounded text-xs"
-              min={1}
-            />
-            <span className="text-xs text-gray-500">sec</span>
+      
+      <div className="mt-2 flex items-center gap-2 text-sm border-t pt-2 justify-between">
+        <div className="flex items-center gap-2">
+            <Clock size={14} className="text-gray-400" />
+            <span className="text-gray-600 text-xs">Duration:</span>
+            {!isWidget && item.media && item.media.type === 'VIDEO' ? (
+            <span className="text-gray-500 text-xs italic">{item.duration}s (Auto)</span>
+            ) : (
+            <div className="flex items-center gap-2">
+                <input
+                type="number"
+                value={item.duration}
+                onChange={(e) => onUpdate({ duration: parseInt(e.target.value) || 5 })}
+                className="w-16 px-1 py-0.5 border rounded text-xs"
+                min={1}
+                />
+                <span className="text-xs text-gray-500">sec</span>
+            </div>
+            )}
+        </div>
+        <button onClick={() => setShowSchedule(!showSchedule)} className="text-gray-400 hover:text-gray-600">
+            {showSchedule ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+      </div>
+
+      {/* Scheduling Controls */}
+      {showSchedule && (
+          <div className="mt-2 pt-2 border-t border-dashed space-y-3 bg-gray-50 p-2 rounded">
+              <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Validity Period</label>
+                  <div className="grid grid-cols-2 gap-2">
+                      <input 
+                        type="date" 
+                        className="text-xs border rounded p-1" 
+                        value={item.startDate ? new Date(item.startDate).toISOString().split('T')[0] : ''}
+                        onChange={(e) => onUpdate({ startDate: e.target.value ? new Date(e.target.value) : undefined })}
+                      />
+                      <input 
+                        type="date" 
+                        className="text-xs border rounded p-1" 
+                        value={item.endDate ? new Date(item.endDate).toISOString().split('T')[0] : ''}
+                        onChange={(e) => onUpdate({ endDate: e.target.value ? new Date(e.target.value) : undefined })}
+                      />
+                  </div>
+              </div>
+              
+              <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Daily Schedule</label>
+                  <div className="grid grid-cols-2 gap-2">
+                      <input 
+                        type="time" 
+                        className="text-xs border rounded p-1" 
+                        value={item.startTime || ''}
+                        onChange={(e) => onUpdate({ startTime: e.target.value })}
+                      />
+                      <input 
+                        type="time" 
+                        className="text-xs border rounded p-1" 
+                        value={item.endTime || ''}
+                        onChange={(e) => onUpdate({ endTime: e.target.value })}
+                      />
+                  </div>
+              </div>
+
+              <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Days of Week</label>
+                  <div className="flex justify-between">
+                      {days.map((day, idx) => (
+                          <button
+                            key={day}
+                            onClick={() => toggleDay(idx)}
+                            className={`text-[10px] w-6 h-6 rounded flex items-center justify-center transition-colors ${selectedDays.includes(idx) ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}
+                          >
+                              {day.charAt(0)}
+                          </button>
+                      ))}
+                  </div>
+              </div>
           </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
@@ -275,8 +356,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                     const newItems = selectedZone.items.filter(i => i.id !== item.id);
                     onUpdateZone(selectedZone.id, { items: newItems });
                   }}
-                  onDurationChange={(val) => {
-                    const newItems = selectedZone.items.map(i => i.id === item.id ? { ...i, duration: val } : i);
+                  onUpdate={(updates) => {
+                    const newItems = selectedZone.items.map(i => i.id === item.id ? { ...i, ...updates } : i);
                     onUpdateZone(selectedZone.id, { items: newItems });
                   }}
                 />

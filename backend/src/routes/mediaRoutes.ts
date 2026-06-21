@@ -12,6 +12,8 @@ router.get('/', checkPermission('media:read'), mediaController.getLibrary);
 
 // Upload Files
 router.post('/upload', checkPermission('media:write'), upload.array('files'), mediaController.uploadFiles);
+router.post('/presigned-url', checkPermission('media:write'), mediaController.getPresignedUrl);
+router.post('/register', checkPermission('media:write'), mediaController.registerFile);
 
 // Files
 router.put('/files/:id', checkPermission('media:write'), mediaController.updateFile);

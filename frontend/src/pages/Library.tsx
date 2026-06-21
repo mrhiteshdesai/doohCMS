@@ -231,12 +231,56 @@ const Library = () => {
     }
     
     try {
-      await mediaService.uploadFiles(
-        filesToUpload, 
-        currentFolderId,
-        (progress) => setUploadProgress(progress),
-        metadata
-      );
+      // Try to upload using S3 Presigned URLs first
+      let useLegacy = false;
+      
+      try {
+          // Check if S3 is configured by requesting a URL for the first file
+          // We don't use this URL, just checking configuration
+          await mediaService.getPresignedUrl(filesToUpload[0].name, filesToUpload[0].type);
+      } catch (e: any) {
+          // If 400 (Bad Request), likely "S3 storage is not configured"
+          if (e.response && e.response.status === 400) {
+              useLegacy = true;
+          } else {
+              throw e; // Real error (network, 500, etc)
+          }
+      }
+
+      if (useLegacy) {
+          await mediaService.uploadFiles(
+            filesToUpload, 
+            currentFolderId,
+            (progress) => setUploadProgress(progress),
+            metadata
+          );
+      } else {
+          // S3 Direct Upload Flow
+          for (let i = 0; i < filesToUpload.length; i++) {
+              const file = filesToUpload[i];
+              const fileMeta = metadata[i];
+              
+              // 1. Get Presigned URL
+              const { uploadUrl, key } = await mediaService.getPresignedUrl(file.name, file.type);
+              
+              // 2. Upload to S3
+              await mediaService.uploadToS3(uploadUrl, file, file.type, (pct) => {
+                  const globalPct = Math.round(((i * 100) + pct) / filesToUpload.length);
+                  setUploadProgress(globalPct);
+              });
+
+              // 3. Register File
+              await mediaService.registerFile({
+                  key,
+                  filename: file.name,
+                  size: file.size,
+                  mimeType: file.type,
+                  folderId: currentFolderId,
+                  metadata: fileMeta
+              });
+          }
+      }
+
       fetchLibrary();
     } catch (error: any) {
       console.error(error);
