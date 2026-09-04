@@ -22,6 +22,9 @@ export interface ZoneItem {
   media?: MediaFile;
   order: number;
   duration: number;
+  type?: 'MEDIA' | 'WIDGET' | 'AD_SLOT';
+  vastUrl?: string;
+  vastTimeoutMs?: number;
   startDate?: Date;
   endDate?: Date;
   startTime?: string;

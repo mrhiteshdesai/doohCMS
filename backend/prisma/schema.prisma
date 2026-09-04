@@ -26,6 +26,9 @@ model Tenant {
   screenGroups ScreenGroup[]
   users        User[]
   widgets      Widget[]
+  appReleases  AppRelease[]
+  appUpdateEvents AppUpdateEvent[]
+  adImpressions AdImpression[]
 }
 
 model Layout {
@@ -122,17 +125,19 @@ model PlaylistZone {
 }
 
 model PlaylistZoneItem {
-  id        String       @id @default(uuid())
-  zoneId    String
-  mediaId   String?
-  widgetId  String?
-  type      String       @default("MEDIA")
-  order     Int
-  duration  Int          @default(10)
-  createdAt DateTime     @default(now())
-  widget    Widget?      @relation(fields: [widgetId], references: [id])
-  media     MediaFile?   @relation(fields: [mediaId], references: [id])
-  zone      PlaylistZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  id              String       @id @default(uuid())
+  zoneId          String
+  mediaId         String?
+  widgetId        String?
+  type            String       @default("MEDIA")
+  order           Int
+  duration        Int          @default(10)
+  vastUrl         String?
+  vastTimeoutMs   Int          @default(3000)
+  createdAt       DateTime     @default(now())
+  widget          Widget?      @relation(fields: [widgetId], references: [id])
+  media           MediaFile?   @relation("PlaylistItemMedia", fields: [mediaId], references: [id])
+  zone            PlaylistZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
 }
 
 model ScreenGroup {
@@ -232,6 +237,7 @@ model Screen {
   snapshots        ScreenSnapshot[]
   isDeleted        Boolean             @default(false)
   deletedAt        DateTime?
+  adImpressions    AdImpression[]
 
   // Telemetry & Health
   cpuTemp          Float?
@@ -310,8 +316,9 @@ model MediaFile {
   width         Int?
   tenant        Tenant             @relation(fields: [tenantId], references: [id])
   folder        MediaFolder?       @relation(fields: [folderId], references: [id])
-  playlistItems PlaylistZoneItem[]
+  playlistItems PlaylistZoneItem[] @relation("PlaylistItemMedia")
   proofOfPlays  ProofOfPlay[]
+  adImpressions AdImpression[] @relation("AdFallbackMedia")
 }
 
 model ProofOfPlay {
@@ -332,6 +339,31 @@ model ProofOfPlay {
   @@index([mediaId])
   @@index([playlistId])
   @@index([tenantId])
+}
+
+model AdImpression {
+  id              String     @default(uuid())
+  tenantId        String
+  screenId        String
+  playlistId      String?
+  playlistItemId  String?
+  vastAdId        String?
+  creativeId      String?
+  mediaFileUrl    String?
+  fallbackMediaId String?
+  filled          Boolean    @default(false)
+  completed       Boolean    @default(false)
+  durationSec     Int        @default(0)
+  error           String?
+  startedAt       DateTime   @default(now())
+  tenant          Tenant     @relation(fields: [tenantId], references: [id])
+  screen          Screen     @relation(fields: [screenId], references: [id])
+  fallbackMedia   MediaFile? @relation("AdFallbackMedia", fields: [fallbackMediaId], references: [id])
+
+  @@id([id, startedAt])
+  @@index([tenantId])
+  @@index([screenId])
+  @@index([startedAt])
 }
 
 model Schedule {
@@ -364,4 +396,46 @@ model SystemSettings {
   traffic   Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AppRelease {
+  id           String           @id @default(uuid())
+  tenantId     String?
+  versionName  String
+  versionCode  Int
+  apkUrl       String
+  sha256       String
+  fileSize     BigInt?
+  minSdk       Int?
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  tenant       Tenant?          @relation(fields: [tenantId], references: [id])
+  updateEvents AppUpdateEvent[]
+
+  @@index([tenantId])
+  @@index([versionCode])
+}
+
+model AppUpdateEvent {
+  id            String     @id @default(uuid())
+  tenantId      String
+  screenId      String
+  releaseId     String?
+  commandId     String?
+  targetVersion String?
+  targetCode    Int?
+  fromVersion   String?
+  status        String     @default("QUEUED")
+  message       String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  tenant        Tenant     @relation(fields: [tenantId], references: [id])
+  release       AppRelease? @relation(fields: [releaseId], references: [id])
+
+  @@index([tenantId])
+  @@index([screenId])
+  @@index([releaseId])
+  @@index([status])
 }

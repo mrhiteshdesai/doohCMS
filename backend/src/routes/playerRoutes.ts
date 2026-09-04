@@ -17,6 +17,7 @@ router.post('/heartbeat', authenticate, heartbeatLimiter, playerController.heart
 router.get('/content', authenticate, screenController.getScreenContent);
 router.get('/manifest', authenticate, playerController.getNativeManifest);
 router.post('/pop', authenticate, playerController.submitProofOfPlay);
+router.post('/ad-impression', authenticate, playerController.submitAdImpression);
 router.post('/snapshot', authenticate, upload.single('snapshot'), playerController.uploadSnapshot);
 router.post('/support-bundle', authenticate, supportBundleUpload.single('bundle'), playerController.uploadSupportBundle);
 

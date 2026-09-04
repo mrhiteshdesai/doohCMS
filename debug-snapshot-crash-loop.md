@@ -1,0 +1,23 @@
+# Debug Session: snapshot-crash-loop
+
+- Status: PARTIAL — black screenshot **FIXED** (2026-09-03); reboot/crash-loop still OPEN if still observed
+- Started: 2026-06-23
+- Symptoms:
+  - ~~Snapshot request returns a blank black screenshot.~~ **Fixed**
+  - After reboot, the app does not reopen.
+  - Manual reopen shows "Connecting..." and then the app crashes.
+- Root cause (black screenshot):
+  - ExoPlayer renders into a `TextureView` GPU surface.
+  - Snapshot used `View.draw(Canvas)`, which does not include TextureView content → solid black JPEG.
+- Fix (black screenshot):
+  - Keep `Canvas.draw` for images/widgets/overlays.
+  - Walk the playback stage for live `TextureView`s and composite `TextureView.getBitmap()` onto the snapshot at on-screen offsets (`MainActivity.captureSnapshotBitmap` / `drawTextureViewsOnto`).
+  - Video path remains on `TextureView` (not `SurfaceView`) so frames are readable.
+- Remaining hypotheses (crash-loop / reboot):
+  - App restart crashes during startup because persisted state or cached content is invalid and a null/illegal state is hit while reconnecting.
+  - App restart crashes because the newly added UI/update flow triggers a main-thread or view-state exception during `Connecting...` / initial sync.
+  - A background sync or playback recovery path is throwing after process restart, leaving the app in a crash loop.
+- Evidence plan (remaining):
+  - Reproduce reboot/crash issues on device if still present.
+  - Capture `adb logcat` around app relaunch crash.
+  - Inspect native startup/recovery code paths.

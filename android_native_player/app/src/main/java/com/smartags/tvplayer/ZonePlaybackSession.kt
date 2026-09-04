@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
 import android.util.Xml
+import android.view.TextureView
 import android.view.View
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -53,6 +54,7 @@ class ZonePlaybackSession(
     private val zone: ZoneModel,
     private val widgetEnv: WidgetRuntimeEnv,
     private val screenLocation: ScreenLocationModel?,
+    private val screenId: String?,
     private val ensureDownloaded: suspend (MediaFileModel) -> Boolean,
     private val localFileFor: (MediaFileModel) -> File,
     private val isMediaQuarantined: (MediaFileModel) -> String?,
@@ -61,7 +63,8 @@ class ZonePlaybackSession(
     private val onActiveMedia: (zoneId: String, mediaId: String?) -> Unit,
     private val onPlaybackIssue: (zoneId: String, itemId: String, media: MediaFileModel?, message: String, decoderError: String?) -> Unit,
     private val onPlaybackSuccess: (zoneId: String, mediaId: String?, playlistId: String?) -> Unit,
-    private val onProofOfPlay: (mediaId: String, playlistId: String?, startedAtMs: Long, durationSeconds: Int) -> Unit
+    private val onProofOfPlay: (mediaId: String, playlistId: String?, startedAtMs: Long, durationSeconds: Int) -> Unit,
+    private val onAdImpression: (JSONObject) -> Unit
 ) {
     val container: FrameLayout = FrameLayout(context).apply {
         setBackgroundColor(Color.BLACK)
@@ -102,6 +105,7 @@ class ZonePlaybackSession(
                 val item = items[index % items.size]
                 val ok = try {
                     when {
+                        item.isAdSlot -> playVastItem(item)
                         item.media != null -> playMediaItem(item)
                         item.widget != null -> playWidgetItem(item)
                         else -> playFallbackItem(item)
@@ -166,6 +170,78 @@ class ZonePlaybackSession(
         }
     }
 
+    private suspend fun playVastItem(item: PlaylistEntryModel): Boolean {
+        val slotSec = item.duration.coerceAtLeast(1)
+        val vastUrlRaw = item.vastUrl?.trim().orEmpty()
+        if (vastUrlRaw.isBlank()) {
+            onAdImpression(
+                VastHelper.toImpressionPayload(
+                    null, playlist.id, item, filled = false, completed = false,
+                    durationSec = slotSec, error = "Missing vastUrl"
+                )
+            )
+            return playMediaItem(item) || playFallbackItem(item)
+        }
+
+        onPlaybackStateChanged(zone.id, "BUFFERING", item.media?.id)
+        val expanded = VastHelper.expandMacros(
+            vastUrlRaw,
+            screenId,
+            zone.width,
+            zone.height,
+            screenLocation?.latitude,
+            screenLocation?.longitude
+        )
+        val fill = VastHelper.fetchFill(expanded, item.vastTimeoutMs.toLong())
+        if (fill == null) {
+            onAdImpression(
+                VastHelper.toImpressionPayload(
+                    null, playlist.id, item, filled = false, completed = false,
+                    durationSec = slotSec, error = "VAST empty or timeout"
+                )
+            )
+            // House fallback for this timeslot
+            return if (item.media != null) playMediaItem(item) else playFallbackItem(item)
+        }
+
+        VastHelper.fireUrls(fill.impressionUrls)
+        VastHelper.fireUrls(fill.tracking["start"] ?: emptyList())
+
+        val synthetic = MediaFileModel(
+            id = "vast-${fill.adId ?: item.id}",
+            url = fill.mediaUrl,
+            mimeType = fill.mimeType.ifBlank { "video/mp4" },
+            filename = fill.creativeId ?: "vast-creative",
+            duration = fill.durationSec
+        )
+        val cappedItem = item.copy(duration = slotSec, media = synthetic, type = "AD_SLOT")
+        val startedAtMs = System.currentTimeMillis()
+        val played = playVideo(cappedItem, synthetic, null)
+        val elapsedSec = ((System.currentTimeMillis() - startedAtMs) / 1000L).toInt().coerceAtLeast(1)
+
+        if (played) {
+            VastHelper.fireUrls(fill.tracking["complete"] ?: emptyList())
+            onAdImpression(
+                VastHelper.toImpressionPayload(
+                    fill, playlist.id, item, filled = true, completed = true, durationSec = elapsedSec.coerceAtMost(slotSec)
+                )
+            )
+        } else {
+            VastHelper.fireUrls(fill.errorUrls.map { it.replace("[ERRORCODE]", "400") })
+            onAdImpression(
+                VastHelper.toImpressionPayload(
+                    fill, playlist.id, item, filled = true, completed = false,
+                    durationSec = elapsedSec.coerceAtMost(slotSec), error = "Playback failed"
+                )
+            )
+            // Still try house creative so the slot isn't empty this loop if video failed early
+            if (item.media != null) {
+                return playMediaItem(item)
+            }
+        }
+        return played
+    }
+
     private suspend fun playMediaItem(item: PlaylistEntryModel): Boolean {
         val media = item.media ?: return false
         isMediaQuarantined(media)?.let { reason ->
@@ -178,6 +254,16 @@ class ZonePlaybackSession(
         onPlaybackStateChanged(zone.id, "BUFFERING", media.id)
         onActiveMedia(zone.id, media.id)
         onPlaybackProgress(zone.id, media.id)
+
+        val existingFile = localFileFor(media)
+        val hasLocalFile = existingFile.exists() && existingFile.length() > 0L
+
+        if (media.mimeType.startsWith("video/") && !hasLocalFile) {
+            scope.launch {
+                ensureDownloaded(media)
+            }
+            return playVideo(item, media, null)
+        }
 
         val primaryOk = ensureDownloaded(media)
         var file = localFileFor(media)
@@ -219,23 +305,38 @@ class ZonePlaybackSession(
         }
     }
 
-    private suspend fun playVideo(item: PlaylistEntryModel, media: MediaFileModel, file: File): Boolean {
-        if (!file.exists() || file.length() == 0L) {
-            onPlaybackIssue(zone.id, item.id, media, "Playable file missing: ${media.filename}", null)
+    private suspend fun playVideo(item: PlaylistEntryModel, media: MediaFileModel, file: File?): Boolean {
+        val localFile = file?.takeIf { it.exists() && it.length() > 0L }
+        val sourceUri = when {
+            localFile != null -> Uri.fromFile(localFile)
+            media.url.isNotBlank() -> Uri.parse(media.url)
+            else -> null
+        }
+
+        if (sourceUri == null) {
+            onPlaybackIssue(zone.id, item.id, media, "Playable source missing: ${media.filename}", null)
             showTemporaryFallback("Missing playable file")
             onPlaybackStateChanged(zone.id, "ERROR", null)
             return false
         }
-        val sourceUri = Uri.fromFile(file)
-        val playerView = PlayerView(context).apply {
-            useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+
+        // TextureView (not SurfaceView) so CMS snapshots can read frames via getBitmap().
+        val textureView = TextureView(context).apply {
+            isOpaque = false
+        }
+        val playerView = FrameLayout(context).apply {
             setBackgroundColor(Color.BLACK)
+            addView(
+                textureView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
         }
 
         val exoPlayer = ExoPlayer.Builder(context).build()
-        currentPlayer = exoPlayer
-        playerView.player = exoPlayer
+        exoPlayer.setVideoTextureView(textureView)
         exoPlayer.repeatMode = Player.REPEAT_MODE_ONE
 
         val factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(httpClient))
@@ -246,6 +347,7 @@ class ZonePlaybackSession(
 
         onPlaybackStateChanged(zone.id, "PLAYING", media.id)
         transitionTo(playerView)
+        currentPlayer = exoPlayer
 
         val targetMs = item.duration.coerceAtLeast(1) * 1000L
         val startedAtMs = System.currentTimeMillis()
@@ -261,6 +363,36 @@ class ZonePlaybackSession(
                 if (cont.isActive) cont.resume(true)
             }
             val listener = object : Player.Listener {
+                // #region debug-point exoplayer-state
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    NativeOpsLogger.log(
+                        context,
+                        "INFO",
+                        "ExoPlayer state changed",
+                        JSONObject()
+                            .put("mediaId", media.id)
+                            .put("filename", media.filename)
+                            .put("state", playbackState)
+                            .put("playWhenReady", exoPlayer.playWhenReady)
+                            .put("hasLocalFile", localFile != null)
+                            .put("sourceUri", sourceUri.toString())
+                    )
+                }
+
+                override fun onRenderedFirstFrame() {
+                    NativeOpsLogger.log(
+                        context,
+                        "INFO",
+                        "ExoPlayer rendered first frame",
+                        JSONObject()
+                            .put("mediaId", media.id)
+                            .put("filename", media.filename)
+                            .put("hasLocalFile", localFile != null)
+                            .put("sourceUri", sourceUri.toString())
+                    )
+                }
+                // #endregion
+
                 override fun onPlayerError(error: PlaybackException) {
                     onPlaybackIssue(zone.id, item.id, media, "Video error: ${error.errorCodeName}", error.errorCodeName)
                     onPlaybackStateChanged(zone.id, "ERROR", null)
@@ -280,7 +412,7 @@ class ZonePlaybackSession(
         onActiveMedia(zone.id, null)
 
         if (!ok) {
-            if (file.exists()) file.delete()
+            if (localFile != null && localFile.exists()) localFile.delete()
             showTemporaryFallback("Video skipped due to playback error")
             return false
         }
@@ -410,11 +542,13 @@ class ZonePlaybackSession(
     }
 
     private fun releasePlayer(exceptView: View? = null) {
-        currentPlayer?.release()
-        currentPlayer = null
-
-        if (currentView is PlayerView && currentView !== exceptView) {
-            (currentView as PlayerView).player = null
+        val activeView = currentView
+        if (activeView !== exceptView) {
+            currentPlayer?.release()
+            currentPlayer = null
+            if (activeView is PlayerView) {
+                activeView.player = null
+            }
         }
     }
 

@@ -10,6 +10,7 @@ import {
   normalizeHeartbeatTelemetry,
   normalizeNativeCommand
 } from './nativeFleetService';
+import { recordUpdateEventFromHeartbeat } from './appReleaseService';
 
 // Helper to resolve active schedule (Phase 2.2)
 const resolveActiveSchedule = async (screenId: string, tenantId: string) => {
@@ -261,6 +262,7 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
   }
   
   const normalizedMetadata = normalizeHeartbeatTelemetry(metadata);
+  const tenantId = screen.tenantId || '';
   let newConfig = screen?.config as any || {};
   if (Object.keys(normalizedMetadata).length > 0) {
     const currentTelemetry = newConfig.telemetry || {};
@@ -354,6 +356,9 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
         cmd.updatedAt = new Date();
         if (update.message) cmd.message = update.message;
       }
+      if (tenantId) {
+        recordUpdateEventFromHeartbeat(screenId, tenantId, update).catch(() => undefined);
+      }
     });
     newConfig.commandHistory = history;
   }
@@ -370,6 +375,13 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
         if (cmd && cmd.status === 'PENDING') {
             cmd.status = 'SENT';
             cmd.updatedAt = new Date();
+        }
+        if (tenantId && pc?.id) {
+          recordUpdateEventFromHeartbeat(screenId, tenantId, {
+            id: String(pc.id),
+            status: 'SENT',
+            message: `${pc.type || 'command'} sent to device`,
+          }).catch(() => undefined);
         }
      });
      newConfig.commandHistory = history;

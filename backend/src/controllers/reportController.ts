@@ -69,6 +69,41 @@ export const getProofOfPlay = async (req: Request, res: Response) => {
   }
 };
 
+export const getAdImpressions = async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).user;
+    const { startDate, endDate, screenId } = req.query;
+    const { listAdImpressions } = await import('../services/adImpressionService');
+    const logs = await listAdImpressions(tenantId, {
+      screenId: screenId ? String(screenId) : undefined,
+      from: startDate ? new Date(String(startDate)) : undefined,
+      to: endDate ? new Date(String(endDate)) : undefined,
+      limit: 1000,
+    });
+    res.json(
+      logs.map((log) => ({
+        id: log.id,
+        screenName: log.screen?.name || log.screenId,
+        screenId: log.screenId,
+        playlistId: log.playlistId,
+        playlistItemId: log.playlistItemId,
+        vastAdId: log.vastAdId,
+        creativeId: log.creativeId,
+        mediaFileUrl: log.mediaFileUrl,
+        fallbackMedia: log.fallbackMedia?.name || null,
+        filled: log.filled,
+        completed: log.completed,
+        durationSec: log.durationSec,
+        error: log.error,
+        startedAt: log.startedAt,
+      }))
+    );
+  } catch (error: any) {
+    console.error('Ad Impression Report Error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 import { generateUptimeReport } from '../services/reportService';
 
 export const getUptimeReport = async (req: Request, res: Response) => {

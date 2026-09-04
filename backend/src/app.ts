@@ -28,6 +28,7 @@ import reportRoutes from './routes/reportRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import systemSettingsRoutes from './routes/systemSettingsRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
+import appReleaseRoutes from './routes/appReleaseRoutes';
 
 const app = express();
 
@@ -111,6 +112,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/app-releases', appReleaseRoutes);
 
 // Static files serving with robust path resolution
 const uploadDir = path.join(__dirname, '../uploads');

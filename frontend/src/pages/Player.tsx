@@ -8,6 +8,7 @@ import { applyTheme } from '../utils/colors';
 import { playerCache } from '../lib/playerCache';
 import { playerSync } from '../lib/playerSync';
 import { getFullUrl } from '../utils/url';
+import { expandVastMacros, fetchVastFill, fireTrackingUrls } from '../lib/vast';
 
 declare global {
     interface Window {
@@ -35,6 +36,9 @@ interface PlaylistItem {
   id: string;
   order: number;
   duration: number;
+  type?: string;
+  vastUrl?: string;
+  vastTimeoutMs?: number;
   media?: Media;
   widget?: any;
 }
@@ -71,10 +75,11 @@ const getMediaType = (mimeType: string): 'IMAGE' | 'VIDEO' => {
   return 'IMAGE';
 };
 
-const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrls: Map<string, string>; playlistId: string }) => {
+const ZonePlayer = memo(({ zone, mediaUrls, playlistId, screenId }: { zone: Zone; mediaUrls: Map<string, string>; playlistId: string; screenId?: string }) => {
   const [executionId, setExecutionId] = useState(0);
   const [currentItem, setCurrentItem] = useState<PlaylistItem | null>(null);
   const [mediaLoaded, setMediaLoaded] = useState(false);
+  const [vastSrc, setVastSrc] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTimeUpdateRef = useRef<number>(Date.now());
   const stuckCounterRef = useRef<number>(0);
@@ -95,15 +100,70 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
         const newItem = sortedItems[index];
         
         setCurrentItem(newItem);
+        setVastSrc(null);
         // Always reset state for new execution, even if item ID is same (looping single item)
         setMediaLoaded(false);
         setRetryCount(0);
         lastTimeUpdateRef.current = Date.now();
         stuckCounterRef.current = 0;
+
+        const isAd = newItem.type === 'AD_SLOT' || !!newItem.vastUrl;
+        if (isAd && newItem.vastUrl) {
+          let cancelled = false;
+          (async () => {
+            const url = expandVastMacros(newItem.vastUrl!, {
+              screenId,
+              width: zone.width,
+              height: zone.height,
+            });
+            const fill = await fetchVastFill(url, newItem.vastTimeoutMs || 3000);
+            if (cancelled) return;
+            const token = localStorage.getItem('token');
+            const report = async (payload: any) => {
+              if (!token) return;
+              try {
+                await axios.post(`${API_URL}/player/ad-impression`, { logs: [payload] }, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+              } catch { /* ignore */ }
+            };
+            if (fill) {
+              fireTrackingUrls(fill.impressionUrls);
+              fireTrackingUrls(fill.tracking.start || []);
+              setVastSrc(fill.mediaUrl);
+              setMediaLoaded(false);
+              await report({
+                playlistId,
+                playlistItemId: newItem.id,
+                vastAdId: fill.adId,
+                creativeId: fill.creativeId,
+                mediaFileUrl: fill.mediaUrl,
+                fallbackMediaId: newItem.media?.id,
+                filled: true,
+                completed: true,
+                durationSec: newItem.duration || 10,
+                startedAt: new Date().toISOString(),
+              });
+            } else {
+              await report({
+                playlistId,
+                playlistItemId: newItem.id,
+                fallbackMediaId: newItem.media?.id,
+                filled: false,
+                completed: false,
+                durationSec: newItem.duration || 10,
+                error: 'VAST empty or timeout',
+                startedAt: new Date().toISOString(),
+              });
+            }
+          })();
+          return () => { cancelled = true; };
+        }
     } else {
       setCurrentItem(null);
+      setVastSrc(null);
     }
-  }, [executionId, sortedItems]);
+  }, [executionId, sortedItems, playlistId, screenId, zone.width, zone.height]);
 
   const nextItem = () => {
     if (sortedItems.length === 0) return;
@@ -283,10 +343,10 @@ const ZonePlayer = memo(({ zone, mediaUrls, playlistId }: { zone: Zone; mediaUrl
      );
   }
 
-  const type = getMediaType(currentItem.media.mimeType);
-  const src = mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
-  const mediaKey = `${currentItem.id}-${executionId}-${retryCount}`;
-  const isSingleVideoLoop = type === 'VIDEO' && sortedItems.length === 1;
+  const type = vastSrc ? 'VIDEO' : getMediaType(currentItem.media.mimeType);
+  const src = vastSrc || mediaUrls.get(currentItem.media.id) || getFullUrl(currentItem.media.url);
+  const mediaKey = `${currentItem.id}-${executionId}-${retryCount}-${vastSrc ? 'vast' : 'house'}`;
+  const isSingleVideoLoop = type === 'VIDEO' && sortedItems.length === 1 && !vastSrc;
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black">
@@ -552,6 +612,7 @@ const Player = () => {
   
   // Content State
   const [currentPlaylist, setCurrentPlaylist] = useState<Playlist | null>(null);
+  const [pairedScreenId, setPairedScreenId] = useState<string | null>(null);
   const currentPlaylistRef = useRef<Playlist | null>(null);
   const screenDataRef = useRef<any>(null);
   const pairingCodeRef = useRef<string | null>(null);
@@ -1069,6 +1130,7 @@ const Player = () => {
       });
       
       const newContent: ScreenContent = res.data;
+      if (newContent.screenId) setPairedScreenId(newContent.screenId);
 
       // Update Screen Data (Name, Config, etc.)
       const prevConfigStr = JSON.stringify(screenData?.config);
@@ -1342,7 +1404,7 @@ const Player = () => {
                         zIndex: zone.zIndex,
                     }}
                 >
-                    <ZonePlayer zone={zone} mediaUrls={mediaUrls} playlistId={currentPlaylist.id} />
+                    <ZonePlayer zone={zone} mediaUrls={mediaUrls} playlistId={currentPlaylist.id} screenId={pairedScreenId || undefined} />
                 </div>
             ))}
             

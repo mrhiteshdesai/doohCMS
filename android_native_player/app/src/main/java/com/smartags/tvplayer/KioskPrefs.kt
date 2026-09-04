@@ -18,6 +18,9 @@ object KioskPrefs {
     const val KEY_UNLOCK_FAILURES = "tech_unlock_failures"
     const val KEY_UNLOCK_LOCKED_UNTIL = "tech_unlock_locked_until"
     const val KEY_POP_QUEUE = "pop_queue"
+    const val KEY_PENDING_OTA_COMMAND_ID = "pending_ota_command_id"
+    const val KEY_PENDING_OTA_TARGET_VERSION = "pending_ota_target_version"
+    const val KEY_PENDING_OTA_TARGET_CODE = "pending_ota_target_code"
 
     fun prefs(context: Context): SharedPreferences =
         storageContext(context).getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

@@ -74,6 +74,7 @@ export interface Screen {
   lastSeenAt?: string;
   createdAt: string;
   tags?: string;
+  appVersion?: string | null;
 }
 
 export const getScreens = async () => {

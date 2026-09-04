@@ -99,7 +99,7 @@ const SortableSlideItem = ({ item, onDelete, onUpdate }: { item: ZoneItem, onDel
         <div className="flex items-center gap-2">
             <Clock size={14} className="text-gray-400" />
             <span className="text-gray-600 text-xs">Duration:</span>
-            {!isWidget && item.media && item.media.type === 'VIDEO' ? (
+            {!isWidget && item.media && item.media.type === 'VIDEO' && item.type !== 'AD_SLOT' ? (
             <span className="text-gray-500 text-xs italic">{item.duration}s (Auto)</span>
             ) : (
             <div className="flex items-center gap-2">
@@ -118,6 +118,47 @@ const SortableSlideItem = ({ item, onDelete, onUpdate }: { item: ZoneItem, onDel
             {showSchedule ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
+
+      {!isWidget && (
+        <div className="mt-2 border-t pt-2 space-y-2">
+          <label className="flex items-center gap-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={item.type === 'AD_SLOT' || !!item.vastUrl}
+              onChange={(e) =>
+                onUpdate(
+                  e.target.checked
+                    ? { type: 'AD_SLOT', vastUrl: item.vastUrl || '', vastTimeoutMs: item.vastTimeoutMs || 3000 }
+                    : { type: 'MEDIA', vastUrl: '', vastTimeoutMs: 3000 }
+                )
+              }
+            />
+            VAST ad slot (fallback = this media)
+          </label>
+          {(item.type === 'AD_SLOT' || !!item.vastUrl) && (
+            <>
+              <textarea
+                className="w-full text-xs border rounded p-1 font-mono"
+                rows={3}
+                placeholder="VAST tag URL (GAM / pubads…)"
+                value={item.vastUrl || ''}
+                onChange={(e) => onUpdate({ type: 'AD_SLOT', vastUrl: e.target.value })}
+              />
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                Timeout (ms)
+                <input
+                  type="number"
+                  className="w-20 border rounded px-1 py-0.5"
+                  min={500}
+                  max={15000}
+                  value={item.vastTimeoutMs || 3000}
+                  onChange={(e) => onUpdate({ vastTimeoutMs: parseInt(e.target.value) || 3000 })}
+                />
+              </label>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Scheduling Controls */}
       {showSchedule && (

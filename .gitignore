@@ -54,3 +54,9 @@ backend/convert_to_hypertables.js
 backend/list_tables.js
 backend/test_db.js
 backend/test_prisma_connect.ts
+
+# Release signing (never commit)
+android_native_player/keystore.properties
+*.hprof
+*.apk
+

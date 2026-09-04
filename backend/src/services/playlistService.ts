@@ -215,14 +215,24 @@ export const updatePlaylist = async (
 
         if (zone.items && zone.items.length > 0) {
           await tx.playlistZoneItem.createMany({
-            data: zone.items.map((item: any, index: number) => ({
-              zoneId: createdZone.id,
-              mediaId: item.mediaId || null,
-              widgetId: item.widgetId || null,
-              type: item.widgetId ? 'WIDGET' : 'MEDIA',
-              order: index,
-              duration: item.duration
-            }))
+            data: zone.items.map((item: any, index: number) => {
+              const isWidget = !!(item.widgetId || item.type === 'WIDGET');
+              const isAdSlot =
+                !!(item.vastUrl || item.type === 'AD_SLOT') && !isWidget;
+              return {
+                zoneId: createdZone.id,
+                mediaId: item.mediaId || null,
+                widgetId: item.widgetId || null,
+                type: isAdSlot ? 'AD_SLOT' : isWidget ? 'WIDGET' : 'MEDIA',
+                order: index,
+                duration: item.duration ?? 10,
+                vastUrl: isAdSlot ? String(item.vastUrl || '').trim() || null : null,
+                vastTimeoutMs:
+                  isAdSlot && item.vastTimeoutMs != null
+                    ? Number(item.vastTimeoutMs) || 3000
+                    : 3000,
+              };
+            })
           });
         }
       }

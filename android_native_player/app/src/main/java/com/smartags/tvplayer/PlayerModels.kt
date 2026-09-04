@@ -41,9 +41,15 @@ data class PlaylistEntryModel(
     val id: String,
     val order: Int,
     val duration: Int,
+    val type: String = "MEDIA",
+    val vastUrl: String? = null,
+    val vastTimeoutMs: Int = 3000,
     val media: MediaFileModel?,
     val widget: WidgetModel?
-)
+) {
+    val isAdSlot: Boolean
+        get() = type.equals("AD_SLOT", true) || !vastUrl.isNullOrBlank()
+}
 
 data class MediaFileModel(
     val id: String,
@@ -62,15 +68,22 @@ data class WidgetModel(
     val config: JSONObject
 )
 
+private fun optNullableString(json: JSONObject, key: String): String? {
+    val raw = json.opt(key)
+    if (raw == null || raw == JSONObject.NULL) return null
+    val text = raw.toString().trim()
+    return text.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+}
+
 fun parseScreenContent(json: JSONObject, resolveUrl: (String) -> String): ScreenContentModel {
     val playlistObj = json.optJSONObject("playlist")
     return ScreenContentModel(
         screenId = json.optString("screenId", ""),
-        name = json.optString("name", null),
-        orientation = json.optString("orientation", null),
+        name = optNullableString(json, "name"),
+        orientation = optNullableString(json, "orientation"),
         playlist = if (playlistObj != null && playlistObj != JSONObject.NULL) parsePlaylist(playlistObj, resolveUrl) else null,
         location = parseScreenLocation(json),
-        weatherApiKey = json.optString("weatherApiKey", null),
+        weatherApiKey = optNullableString(json, "weatherApiKey"),
         newsFeedUrls = json.optJSONArray("newsFeedUrls")?.let { arr ->
             buildList {
                 for (i in 0 until arr.length()) {
@@ -122,7 +135,7 @@ private fun parsePlaylist(json: JSONObject, resolveUrl: (String) -> String): Pla
 
     return PlaylistModel(
         id = json.optString("id", ""),
-        name = json.optString("name", null),
+        name = optNullableString(json, "name"),
         canvasWidth = json.optInt("canvasWidth", 1920).coerceAtLeast(1),
         canvasHeight = json.optInt("canvasHeight", 1080).coerceAtLeast(1),
         zones = zones
@@ -157,6 +170,9 @@ private fun parseEntry(json: JSONObject, resolveUrl: (String) -> String): Playli
         id = json.optString("id", ""),
         order = json.optInt("order", 0),
         duration = json.optInt("duration", 10).coerceAtLeast(1),
+        type = json.optString("type", "MEDIA").ifBlank { "MEDIA" },
+        vastUrl = optNullableString(json, "vastUrl"),
+        vastTimeoutMs = json.optInt("vastTimeoutMs", 3000).coerceIn(500, 15000),
         media = mediaJson?.let {
             MediaFileModel(
                 id = it.optString("id", ""),
@@ -165,8 +181,8 @@ private fun parseEntry(json: JSONObject, resolveUrl: (String) -> String): Playli
                 filename = it.optString("filename", it.optString("id", "")),
                 duration = if (it.has("duration")) it.optInt("duration") else null,
                 sizeBytes = it.optDouble("size", Double.NaN).takeIf { value -> !value.isNaN() }?.toLong(),
-                updatedAt = it.optString("updatedAt", null),
-                sha256 = it.optString("sha256", null)
+                updatedAt = optNullableString(it, "updatedAt"),
+                sha256 = optNullableString(it, "sha256")
             )
         },
         widget = widgetJson?.let {

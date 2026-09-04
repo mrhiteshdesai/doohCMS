@@ -23,7 +23,8 @@ import {
   Activity,
   HeartPulse,
   FileCheck,
-  Tag
+  Tag,
+  Package
 } from 'lucide-react';
 import { getFullUrl } from '../utils/url';
 
@@ -96,6 +97,7 @@ const DashboardLayout = () => {
         { name: 'Proof of Play', path: '/reports/proof-of-play', icon: <FileCheck size={20} /> },
       ]
     },
+    { name: 'App Releases', path: '/app-releases', icon: <Package size={20} />, module: 'screen' },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} />, module: 'settings' },
   ];
 

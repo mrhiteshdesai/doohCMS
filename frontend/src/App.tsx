@@ -21,6 +21,7 @@ import Profile from './pages/Profile';
 import UptimeReport from './pages/Reports/UptimeReport';
 import HeartbeatReport from './pages/Reports/HeartbeatReport';
 import ProofOfPlayReport from './pages/Reports/ProofOfPlayReport';
+import AppReleases from './pages/AppReleases';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { Toaster } from 'react-hot-toast';
@@ -58,6 +59,7 @@ function App() {
               <Route path="/reports/uptime" element={<UptimeReport />} />
               <Route path="/reports/heartbeat" element={<HeartbeatReport />} />
               <Route path="/reports/proof-of-play" element={<ProofOfPlayReport />} />
+              <Route path="/app-releases" element={<AppReleases />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>

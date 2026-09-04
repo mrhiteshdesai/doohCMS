@@ -57,6 +57,9 @@ const PlaylistEditor: React.FC = () => {
               return {
                 ...base,
                 mediaId: i.mediaId,
+                type: i.type === 'AD_SLOT' || i.vastUrl ? 'AD_SLOT' : 'MEDIA',
+                vastUrl: i.vastUrl || '',
+                vastTimeoutMs: i.vastTimeoutMs || 3000,
                 media: {
                   id: i.media.id,
                   filename: i.media.name,
@@ -122,11 +125,14 @@ const PlaylistEditor: React.FC = () => {
                 type: 'WIDGET'
               };
             }
+            const isAd = item.type === 'AD_SLOT' || !!item.vastUrl;
             return {
               mediaId: item.mediaId!,
               duration: item.duration,
               order: index,
-              type: 'MEDIA'
+              type: isAd ? 'AD_SLOT' : 'MEDIA',
+              vastUrl: isAd ? (item.vastUrl || '') : undefined,
+              vastTimeoutMs: isAd ? (item.vastTimeoutMs || 3000) : undefined,
             };
           })
         }))

@@ -6,13 +6,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.KeyEvent
+import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.Button
@@ -44,6 +48,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.time.Instant
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -62,11 +67,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playbackStage: FrameLayout
     private lateinit var overlay: View
     private lateinit var titleText: TextView
+    private lateinit var overlayHeadingText: TextView
     private lateinit var statusText: TextView
+    private lateinit var statusDetailText: TextView
+    private lateinit var overlaySubtitleText: TextView
+    private lateinit var downloadRow: View
+    private lateinit var downloadPercentText: TextView
     private lateinit var apiBaseInput: EditText
     private lateinit var saveApiButton: Button
     private lateinit var pairingCodeText: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var pairingInstructionsText: TextView
+    private lateinit var updateOverlay: View
+    private lateinit var updateOverlayText: TextView
+    private lateinit var updateOverlayProgress: ProgressBar
+    private lateinit var sysResText: TextView
+    private lateinit var sysCoresText: TextView
+    private lateinit var sysMemText: TextView
+    private lateinit var sysPlatformText: TextView
+    private lateinit var sysUaText: TextView
 
     private lateinit var settingsContainer: LinearLayout
     private lateinit var settingsDeviceOwner: TextView
@@ -94,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private var contentRefreshJob: Job? = null
     private var popFlushJob: Job? = null
     private var reliabilityJob: Job? = null
+    private var assetSyncJob: Job? = null
 
     private var apiBase: String? = null
     private var token: String? = null
@@ -101,6 +121,12 @@ class MainActivity : AppCompatActivity() {
     private var currentPlaylistId: String? = null
     private var currentPlaylistFingerprint: String? = null
     private var currentScreenContentJson: JSONObject? = null
+    private var pendingPlaylist: PlaylistModel? = null
+    private var pendingPlaylistFingerprint: String? = null
+    private var pendingScreenContentJson: JSONObject? = null
+    private var pendingWidgetRuntimeEnv: WidgetRuntimeEnv? = null
+    private var pendingScreenLocation: ScreenLocationModel? = null
+    private var pendingScreenName: String? = null
     private var lastRecoveryAttemptAt: Long = 0L
     private var widgetRuntimeEnv: WidgetRuntimeEnv = WidgetRuntimeEnv()
     private var screenLocation: ScreenLocationModel? = null
@@ -111,6 +137,11 @@ class MainActivity : AppCompatActivity() {
     private var recoveryTapCount: Int = 0
     private var lastRecoveryTapAt: Long = 0
     private val prefsPopQueue = KioskPrefs.KEY_POP_QUEUE
+    private val prefsPendingOtaCommandId = KioskPrefs.KEY_PENDING_OTA_COMMAND_ID
+    private val prefsPendingOtaTargetVersion = KioskPrefs.KEY_PENDING_OTA_TARGET_VERSION
+    private val prefsPendingOtaTargetCode = KioskPrefs.KEY_PENDING_OTA_TARGET_CODE
+    private var installReceiver: AppUpdateManager.InstallResultReceiver? = null
+    private var otaInProgress = false
     private val popQueue: MutableList<JSONObject> = mutableListOf()
     private val telemetry by lazy { NativeTelemetryStore(this) }
     private val prefsLastKnownGoodFingerprint = "last_known_good_fingerprint"
@@ -123,6 +154,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun prefs() = KioskPrefs.prefs(this)
 
+    private enum class DownloadUiTarget {
+        NONE,
+        FULLSCREEN,
+        BOTTOM
+    }
+
+    private var downloadUiTarget: DownloadUiTarget = DownloadUiTarget.NONE
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -130,11 +169,25 @@ class MainActivity : AppCompatActivity() {
         playbackStage = findViewById(R.id.playback_stage)
         overlay = findViewById(R.id.overlay_container)
         titleText = findViewById(R.id.title_text)
+        overlayHeadingText = findViewById(R.id.overlay_heading_text)
         statusText = findViewById(R.id.status_text)
+        statusDetailText = findViewById(R.id.status_detail_text)
+        overlaySubtitleText = findViewById(R.id.overlay_subtitle_text)
+        downloadRow = findViewById(R.id.download_row)
+        downloadPercentText = findViewById(R.id.download_percent_text)
         apiBaseInput = findViewById(R.id.api_base_input)
         saveApiButton = findViewById(R.id.save_api_button)
         pairingCodeText = findViewById(R.id.pairing_code_text)
         progress = findViewById(R.id.progress)
+        pairingInstructionsText = findViewById(R.id.pairing_instructions_text)
+        updateOverlay = findViewById(R.id.update_overlay_container)
+        updateOverlayText = findViewById(R.id.update_overlay_text)
+        updateOverlayProgress = findViewById(R.id.update_overlay_progress)
+        sysResText = findViewById(R.id.sys_res_text)
+        sysCoresText = findViewById(R.id.sys_cores_text)
+        sysMemText = findViewById(R.id.sys_mem_text)
+        sysPlatformText = findViewById(R.id.sys_platform_text)
+        sysUaText = findViewById(R.id.sys_ua_text)
 
         settingsContainer = findViewById(R.id.settings_container)
         settingsDeviceOwner = findViewById(R.id.settings_device_owner)
@@ -152,7 +205,27 @@ class MainActivity : AppCompatActivity() {
         settingsExit = findViewById(R.id.settings_exit)
         offlineManager = OfflineMediaManager(this, http) { snapshot ->
             telemetry.updateDownloadSnapshot(snapshot)
+            playbackStage.post { onDownloadSnapshot(snapshot) }
         }
+
+        installReceiver = AppUpdateManager.InstallResultReceiver { commandId, success, message ->
+            if (success) {
+                if (commandId.isNotBlank()) {
+                    prefs().edit()
+                        .putString(prefsPendingOtaCommandId, commandId)
+                        .apply()
+                    queueCommandUpdate(commandId, "INSTALLING", "Install committed; waiting for restart")
+                }
+            } else {
+                otaInProgress = false
+                hideUpdateOverlay()
+                if (commandId.isNotBlank()) {
+                    prefs().edit().remove(prefsPendingOtaCommandId).apply()
+                    queueCommandUpdate(commandId, "FAILED", message)
+                }
+            }
+        }
+        AppUpdateManager.registerInstallReceiver(this, installReceiver!!)
 
         val prefs = prefs()
         apiBase = prefs.getString(prefsApiBase, null)
@@ -160,10 +233,13 @@ class MainActivity : AppCompatActivity() {
         loadPopQueue(prefs)
         ensureTechPin(prefs)
         cleanupQuarantinedMedia()
+        reportPendingOtaCompletionIfNeeded()
 
-        titleText.text = "Smartags TV Player"
+        titleText.text = "Smartags"
         apiBaseInput.setText(apiBase ?: "https://dooh.brandeagles.com/api")
-        pairingCodeText.text = "Pairing Code: -"
+        overlayHeadingText.text = "Initializing..."
+        pairingCodeText.text = "-"
+        updateSystemInfoUi()
         telemetry.markPlaybackState("STARTING")
         NativeOpsLogger.log(this, "INFO", "MainActivity created")
 
@@ -306,12 +382,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        runCatching { installReceiver?.let { unregisterReceiver(it) } }
+        installReceiver = null
         super.onDestroy()
         KioskRuntimeState.activityVisible = false
         heartbeatJob?.cancel()
         contentRefreshJob?.cancel()
         popFlushJob?.cancel()
         reliabilityJob?.cancel()
+        assetSyncJob?.cancel()
         clearStage()
     }
 
@@ -568,7 +647,7 @@ class MainActivity : AppCompatActivity() {
     private fun startOrPair(forceRepair: Boolean) {
         val base = apiBase ?: normalizeApiBase(apiBaseInput.text?.toString())
         if (base == null) {
-            showOverlay("Enter API base URL to continue", showPairing = true)
+            showApiConfigOverlay("Enter API base URL to continue")
             return
         }
 
@@ -595,7 +674,7 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun bootstrapWithToken(existingToken: String) {
         token = existingToken
-        showOverlay("Connecting...", showPairing = false)
+        showBlockingOverlay("Connecting...")
         val ok = fetchAndPlay(force = true)
         if (!ok) {
             prefs().edit().remove(prefsToken).apply()
@@ -607,14 +686,14 @@ class MainActivity : AppCompatActivity() {
     private suspend fun pairDevice() {
         clearStage()
         telemetry.markPlaybackState("PAIRING")
-        showOverlay("Registering device...", showPairing = false)
+        showBlockingOverlay("Registering device...")
         val base = apiBase ?: return
         NativeOpsLogger.log(this, "INFO", "Starting device pairing", JSONObject().put("apiBase", base))
 
         val registerRes = httpPostJson("$base/player/register", JSONObject())
         if (registerRes == null) {
             NativeOpsLogger.log(this, "ERROR", "Device registration failed")
-            showOverlay("Failed to register. Check network/API URL.", showPairing = true)
+            showApiConfigOverlay("Failed to register. Check network/API URL.")
             return
         }
 
@@ -622,14 +701,13 @@ class MainActivity : AppCompatActivity() {
         val screenId = registerRes.optString("screenId", "")
         if (code.isBlank()) {
             NativeOpsLogger.log(this, "ERROR", "Register returned invalid pairing code")
-            showOverlay("Register returned invalid pairing code.", showPairing = true)
+            showApiConfigOverlay("Register returned invalid pairing code.")
             return
         }
 
         val prefs = prefs()
         prefs.edit().putString(prefsLastPairingCode, code).putString(prefsLastScreenId, screenId).apply()
-        pairingCodeText.text = "Pairing Code: $code"
-        showOverlay("Waiting for pairing in dashboard...", showPairing = false)
+        showPairingOverlay(code, "Waiting for pairing in dashboard...")
 
         while (appScope.isActive) {
             val statusRes = httpGetJson("$base/player/status/$code", authToken = null)
@@ -639,7 +717,6 @@ class MainActivity : AppCompatActivity() {
                     NativeOpsLogger.log(this, "INFO", "Device paired successfully", JSONObject().put("screenId", screenId))
                     prefs.edit().putString(prefsToken, newToken).apply()
                     token = newToken
-                    showOverlay("Paired. Syncing content...", showPairing = false)
                     fetchAndPlay(force = true)
                     return
                 }
@@ -663,21 +740,41 @@ class MainActivity : AppCompatActivity() {
             contentJson = remoteContentJson
             NativeOpsLogger.log(this, "INFO", "Fetched remote playlist manifest")
         } else {
-            val cachedContentJson = offlineManager.loadRememberedScreenContent()
-                ?: if (allowLastKnownGoodFallback) offlineManager.loadLastKnownGoodScreenContent() else null
-                ?: return false
-            contentJson = JSONObject(cachedContentJson.toString())
+            val cachedContentJson = (
+                offlineManager.loadRememberedScreenContent()?.takeUnless {
+                    it == JSONObject.NULL || it.toString().trim().equals("null", ignoreCase = true)
+                } ?: if (allowLastKnownGoodFallback) {
+                    offlineManager.loadLastKnownGoodScreenContent()?.takeUnless {
+                        it == JSONObject.NULL || it.toString().trim().equals("null", ignoreCase = true)
+                    }
+                } else {
+                    null
+                }
+            ) ?: return false
+            // #region debug-point cached-content-shape
+            NativeOpsLogger.log(
+                this,
+                "INFO",
+                "Preparing cached playlist manifest",
+                JSONObject()
+                    .put("cachedClass", cachedContentJson?.javaClass?.name ?: "null")
+                    .put("cachedIsJsonNull", cachedContentJson == JSONObject.NULL)
+                    .put("cachedStringPreview", cachedContentJson.toString().take(300))
+                    .put("allowLastKnownGoodFallback", allowLastKnownGoodFallback)
+            )
+            // #endregion
+            contentJson = cachedContentJson
             NativeOpsLogger.log(this, "WARN", "Using cached playlist manifest")
         }
 
-        currentScreenContentJson = JSONObject(contentJson.toString())
         val screenContent = parseScreenContent(contentJson, ::absoluteMediaUrl)
         val playlist = screenContent.playlist
-        widgetRuntimeEnv = WidgetRuntimeEnv(
+        val nextWidgetEnv = WidgetRuntimeEnv(
             weatherApiKey = screenContent.weatherApiKey,
             tenantNewsFeedUrls = screenContent.newsFeedUrls
         )
-        screenLocation = screenContent.location
+        val nextLocation = screenContent.location
+        val nextScreenName = screenContent.name
 
         if (playlist == null || playlist.zones.isEmpty()) {
             if (allowLastKnownGoodFallback && restoreLastKnownGoodContent("empty_or_invalid_playlist", showStatus = true)) {
@@ -685,37 +782,63 @@ class MainActivity : AppCompatActivity() {
             }
             currentPlaylistId = null
             currentPlaylistFingerprint = null
+            currentScreenContentJson = null
+            pendingPlaylist = null
+            pendingPlaylistFingerprint = null
+            pendingScreenContentJson = null
+            pendingWidgetRuntimeEnv = null
+            pendingScreenLocation = null
+            pendingScreenName = null
             telemetry.markPlaybackState("WAITING_FOR_CONTENT")
             telemetry.clearPlaybackErrors()
             clearStage()
-            showOverlay("Waiting for content to be published...", showPairing = false)
+            showPairedWaitingOverlay(nextScreenName)
             startHeartbeat()
             startContentRefresh()
             return true
         }
 
         val fingerprint = screenContentFingerprint(screenContent)
-        currentPlaylistId = playlist.id
+        val isCurrentlyPlaying = zoneSessions.isNotEmpty() && !currentPlaylistFingerprint.isNullOrBlank()
 
         if (!force && fingerprint == currentPlaylistFingerprint) {
-            hideOverlay()
+            hideBlockingOverlay()
+            hideUpdateOverlay()
             telemetry.clearPlaybackErrors()
             startHeartbeat()
             startContentRefresh()
             return true
         }
 
-        showOverlay(if (usingOfflineManifest) "Offline mode: using cached content..." else "Syncing playlist...", showPairing = false)
         val mediaToPrefetch = playlist.zones.flatMap { zone -> zone.items.mapNotNull { it.media } }.distinctBy { it.id }
-        if (!usingOfflineManifest) {
-            offlineManager.syncAssets(mediaToPrefetch)
+        if (usingOfflineManifest) {
+            if (!isCurrentlyPlaying) {
+                commitPlaylistSwap(
+                    playlist = playlist,
+                    fingerprint = fingerprint,
+                    screenContentJson = contentJson,
+                    widgetEnv = nextWidgetEnv,
+                    location = nextLocation
+                )
+            }
+            startHeartbeat()
+            startContentRefresh()
+            return true
         }
 
-        currentPlaylistFingerprint = fingerprint
-        playbackStage.post {
-            renderPlaylist(playlist)
-            hideOverlay()
+        pendingPlaylist = playlist
+        pendingPlaylistFingerprint = fingerprint
+        pendingScreenContentJson = JSONObject(contentJson.toString())
+        pendingWidgetRuntimeEnv = nextWidgetEnv
+        pendingScreenLocation = nextLocation
+        pendingScreenName = nextScreenName
+
+        if (isCurrentlyPlaying) {
+            beginBackgroundUpdate(mediaToPrefetch, fingerprint)
+        } else {
+            beginForegroundLoad(mediaToPrefetch, nextScreenName)
         }
+
         startHeartbeat()
         startContentRefresh()
         return true
@@ -739,15 +862,98 @@ class MainActivity : AppCompatActivity() {
         telemetry.clearPlaybackErrors()
         NativeOpsLogger.log(this, "WARN", "Restoring last known good content", JSONObject().put("reason", reason))
         if (showStatus) {
-            showOverlay("Recovering with last known good playlist ($reason)...", showPairing = false)
+            showBlockingOverlay("Recovering with last known good playlist ($reason)...")
         }
         playbackStage.post {
             renderPlaylist(playlist)
-            hideOverlay()
+            hideBlockingOverlay()
+            hideUpdateOverlay()
         }
         startHeartbeat()
         startContentRefresh()
         return true
+    }
+
+    private fun beginForegroundLoad(mediaToPrefetch: List<MediaFileModel>, screenName: String?) {
+        downloadUiTarget = DownloadUiTarget.FULLSCREEN
+        showPairedDownloadingOverlay(screenName, 0)
+        assetSyncJob?.cancel()
+        assetSyncJob = appScope.launch {
+            offlineManager.syncAssets(mediaToPrefetch)
+            val pending = pendingPlaylist
+            val pendingFingerprint = pendingPlaylistFingerprint
+            val pendingJson = pendingScreenContentJson
+            val pendingEnv = pendingWidgetRuntimeEnv
+            val pendingLocation = pendingScreenLocation
+            if (pending == null || pendingFingerprint.isNullOrBlank() || pendingJson == null || pendingEnv == null) {
+                return@launch
+            }
+            val ready = mediaToPrefetch.all { localFileFor(it).exists() }
+            if (!ready) {
+                playbackStage.post {
+                    showPairedWaitingOverlay(pendingScreenName)
+                }
+                return@launch
+            }
+            playbackStage.post {
+                commitPlaylistSwap(pending, pendingFingerprint, pendingJson, pendingEnv, pendingLocation)
+            }
+        }
+    }
+
+    private fun beginBackgroundUpdate(mediaToPrefetch: List<MediaFileModel>, fingerprint: String) {
+        downloadUiTarget = DownloadUiTarget.BOTTOM
+        showUpdateOverlay(0)
+        assetSyncJob?.cancel()
+        assetSyncJob = appScope.launch {
+            offlineManager.syncAssets(mediaToPrefetch)
+            val pending = pendingPlaylist
+            val pendingFingerprint = pendingPlaylistFingerprint
+            val pendingJson = pendingScreenContentJson
+            val pendingEnv = pendingWidgetRuntimeEnv
+            val pendingLocation = pendingScreenLocation
+            if (pending == null || pendingFingerprint.isNullOrBlank() || pendingJson == null || pendingEnv == null) {
+                playbackStage.post { hideUpdateOverlay() }
+                return@launch
+            }
+            if (pendingFingerprint != fingerprint) {
+                playbackStage.post { hideUpdateOverlay() }
+                return@launch
+            }
+            val ready = mediaToPrefetch.all { localFileFor(it).exists() }
+            if (!ready) {
+                playbackStage.post { hideUpdateOverlay() }
+                return@launch
+            }
+            playbackStage.post {
+                commitPlaylistSwap(pending, pendingFingerprint, pendingJson, pendingEnv, pendingLocation)
+            }
+        }
+    }
+
+    private fun commitPlaylistSwap(
+        playlist: PlaylistModel,
+        fingerprint: String,
+        screenContentJson: JSONObject,
+        widgetEnv: WidgetRuntimeEnv,
+        location: ScreenLocationModel?
+    ) {
+        currentScreenContentJson = JSONObject(screenContentJson.toString())
+        widgetRuntimeEnv = widgetEnv
+        screenLocation = location
+        currentPlaylistId = playlist.id
+        currentPlaylistFingerprint = fingerprint
+        pendingPlaylist = null
+        pendingPlaylistFingerprint = null
+        pendingScreenContentJson = null
+        pendingWidgetRuntimeEnv = null
+        pendingScreenLocation = null
+        pendingScreenName = null
+        downloadUiTarget = DownloadUiTarget.NONE
+        renderPlaylist(playlist)
+        telemetry.clearPlaybackErrors()
+        hideBlockingOverlay()
+        hideUpdateOverlay()
     }
 
     private fun renderPlaylist(playlist: PlaylistModel) {
@@ -763,6 +969,7 @@ class MainActivity : AppCompatActivity() {
                 zone = zone,
                 widgetEnv = widgetRuntimeEnv,
                 screenLocation = screenLocation,
+                screenId = prefs().getString(prefsLastScreenId, null),
                 ensureDownloaded = { media -> ensureDownloaded(media) },
                 localFileFor = { media -> localFileFor(media) },
                 isMediaQuarantined = { media -> quarantinedMediaReason(media) },
@@ -790,6 +997,9 @@ class MainActivity : AppCompatActivity() {
                 onProofOfPlay = { mediaId, playlistId, startedAtMs, durationSeconds ->
                     telemetry.markPlaybackSuccess(mediaId, playlistId)
                     enqueuePop(mediaId, playlistId, startedAtMs, durationSeconds)
+                },
+                onAdImpression = { payload ->
+                    enqueueAdImpression(payload)
                 }
             )
             zoneSessions[zone.id] = session
@@ -994,6 +1204,9 @@ class MainActivity : AppCompatActivity() {
                     KioskPolicyManager.clearHomeLauncherLock(this)
                     if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "HOME launcher lock cleared")
                 }
+                "UPDATE_APP" -> appScope.launch {
+                    handleUpdateAppCommand(id, payload)
+                }
                 "SET_API_BASE" -> {
                     val newBase = normalizeApiBase(payload?.optString("apiBase", null))
                     if (!newBase.isNullOrBlank()) {
@@ -1007,6 +1220,86 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 else -> if (id.isNotBlank()) queueCommandUpdate(id, "FAILED", "Unknown command type: $type")
+            }
+        }
+    }
+
+    private fun reportPendingOtaCompletionIfNeeded() {
+        val prefs = prefs()
+        val pendingId = prefs.getString(prefsPendingOtaCommandId, null) ?: return
+        val targetCode = prefs.getInt(prefsPendingOtaTargetCode, -1)
+        val targetVersion = prefs.getString(prefsPendingOtaTargetVersion, null)
+        val currentCode = AppUpdateManager.currentVersionCode(this)
+        if (targetCode > 0 && currentCode >= targetCode.toLong()) {
+            queueCommandUpdate(
+                pendingId,
+                "COMPLETED",
+                "Updated to $appVersion (code $currentCode)" +
+                    (if (!targetVersion.isNullOrBlank()) " target=$targetVersion" else "")
+            )
+            prefs.edit()
+                .remove(prefsPendingOtaCommandId)
+                .remove(prefsPendingOtaTargetVersion)
+                .remove(prefsPendingOtaTargetCode)
+                .apply()
+        }
+    }
+
+    private suspend fun handleUpdateAppCommand(id: String, payload: org.json.JSONObject?) {
+        if (otaInProgress) {
+            if (id.isNotBlank()) queueCommandUpdate(id, "FAILED", "OTA already in progress")
+            return
+        }
+        val apkUrl = payload?.optString("apkUrl", "")?.trim().orEmpty()
+        val sha256 = payload?.optString("sha256", "")?.trim().orEmpty()
+        val versionCode = payload?.optInt("versionCode", -1) ?: -1
+        val versionName = payload?.optString("versionName", "")?.trim().orEmpty()
+        val force = payload?.optBoolean("force", false) ?: false
+        if (apkUrl.isBlank() || sha256.isBlank() || versionCode < 1) {
+            if (id.isNotBlank()) queueCommandUpdate(id, "FAILED", "Invalid UPDATE_APP payload")
+            return
+        }
+
+        otaInProgress = true
+        if (id.isNotBlank()) {
+            prefs().edit()
+                .putString(prefsPendingOtaCommandId, id)
+                .putString(prefsPendingOtaTargetVersion, versionName)
+                .putInt(prefsPendingOtaTargetCode, versionCode)
+                .apply()
+            queueCommandUpdate(id, "DOWNLOADING", "Starting OTA download")
+        }
+
+        val result = AppUpdateManager.downloadAndInstall(
+            this,
+            AppUpdateManager.UpdateRequest(
+                commandId = id,
+                apkUrl = apkUrl,
+                sha256 = sha256,
+                versionCode = versionCode,
+                versionName = versionName.ifBlank { versionCode.toString() },
+                force = force
+            )
+        ) { progress ->
+            runOnUiThread {
+                showUpdateOverlay(progress.percent, progress.message)
+                if (id.isNotBlank()) {
+                    queueCommandUpdate(id, progress.status, progress.message)
+                }
+            }
+        }
+
+        result.onFailure { err ->
+            otaInProgress = false
+            runOnUiThread { hideUpdateOverlay() }
+            prefs().edit().remove(prefsPendingOtaCommandId).apply()
+            if (id.isNotBlank()) {
+                queueCommandUpdate(id, "FAILED", err.message ?: "OTA failed")
+            }
+        }
+        result.onSuccess {
+            if (id.isNotBlank()) {
+                queueCommandUpdate(id, "INSTALLING", "Install session committed")
             }
         }
     }
@@ -1047,6 +1340,8 @@ class MainActivity : AppCompatActivity() {
         heartbeatJob = null
         contentRefreshJob?.cancel()
         contentRefreshJob = null
+        assetSyncJob?.cancel()
+        assetSyncJob = null
         clearStage()
         appScope.launch { pairDevice() }
     }
@@ -1148,9 +1443,37 @@ class MainActivity : AppCompatActivity() {
             val bitmap = withContext(Dispatchers.Main) { captureSnapshotBitmap() } ?: return@withContext null
             val file = File(cacheDir, "latest_snapshot.jpg")
             runCatching {
+                // #region debug-point snapshot-bitmap-shape
+                val centerPixel = bitmap.getPixel(
+                    (bitmap.width / 2).coerceAtLeast(0).coerceAtMost(bitmap.width - 1),
+                    (bitmap.height / 2).coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+                )
+                NativeOpsLogger.log(
+                    this@MainActivity,
+                    "INFO",
+                    "Snapshot bitmap captured",
+                    JSONObject()
+                        .put("width", bitmap.width)
+                        .put("height", bitmap.height)
+                        .put("centerPixel", centerPixel)
+                        .put("stageChildCount", playbackStage.childCount)
+                        .put("overlayVisible", overlay.visibility == View.VISIBLE)
+                        .put("updateOverlayVisible", updateOverlay.visibility == View.VISIBLE)
+                )
+                // #endregion
                 FileOutputStream(file).use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                 }
+                // #region debug-point snapshot-file-written
+                NativeOpsLogger.log(
+                    this@MainActivity,
+                    "INFO",
+                    "Snapshot file written",
+                    JSONObject()
+                        .put("path", file.absolutePath)
+                        .put("bytes", file.length())
+                )
+                // #endregion
                 file
             }.getOrNull()
         } ?: return false
@@ -1170,9 +1493,33 @@ class MainActivity : AppCompatActivity() {
             .post(body)
             .build()
 
-        return runCatching {
-            http.newCall(req).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                http.newCall(req).execute().use { res ->
+                    val text = res.body?.string()
+                    if (!res.isSuccessful) {
+                        NativeOpsLogger.log(
+                            this@MainActivity,
+                            "ERROR",
+                            "Snapshot upload failed",
+                            JSONObject()
+                                .put("status", res.code)
+                                .put("body", (text ?: "").take(800))
+                        )
+                    }
+                    res.isSuccessful
+                }
+            }.onFailure { t ->
+                NativeOpsLogger.log(
+                    this@MainActivity,
+                    "ERROR",
+                    "Snapshot upload exception",
+                    JSONObject()
+                        .put("type", t.javaClass.simpleName)
+                        .put("message", t.message ?: "")
+                )
+            }.getOrDefault(false)
+        }
     }
 
     private suspend fun exportSupportBundle(): Boolean {
@@ -1201,12 +1548,83 @@ class MainActivity : AppCompatActivity() {
         val target = if (playbackStage.width > 0 && playbackStage.height > 0) playbackStage else window.decorView.rootView
         val width = target.width.takeIf { it > 0 } ?: return null
         val height = target.height.takeIf { it > 0 } ?: return null
+        // #region debug-point snapshot-target-view
+        NativeOpsLogger.log(
+            this,
+            "INFO",
+            "Capturing snapshot bitmap",
+            JSONObject()
+                .put("targetClass", target.javaClass.name)
+                .put("targetWidth", width)
+                .put("targetHeight", height)
+                .put("stageWidth", playbackStage.width)
+                .put("stageHeight", playbackStage.height)
+                .put("stageChildCount", playbackStage.childCount)
+        )
+        // #endregion
         return runCatching {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
                 val canvas = Canvas(bitmap)
+                // Soft UI (images/widgets/overlays) can be drawn normally.
                 target.draw(canvas)
+                // ExoPlayer TextureView frames are GPU surfaces — Canvas.draw leaves them black.
+                // Patch those regions with TextureView.getBitmap() at their on-screen offsets.
+                val textureFrames = drawTextureViewsOnto(target, canvas)
+                NativeOpsLogger.log(
+                    this,
+                    "INFO",
+                    "Snapshot texture frames composited",
+                    JSONObject().put("textureFrames", textureFrames)
+                )
             }
         }.getOrNull()
+    }
+
+    /**
+     * Walk [root] and paint live TextureView frames onto [canvas].
+     * Returns how many TextureView frames were successfully composited.
+     */
+    private fun drawTextureViewsOnto(root: View, canvas: Canvas): Int {
+        var painted = 0
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val rootLoc = IntArray(2)
+        root.getLocationOnScreen(rootLoc)
+
+        fun walk(view: View) {
+            if (view is TextureView && view.isAvailable && view.width > 0 && view.height > 0) {
+                val frame = runCatching { view.bitmap }.getOrNull()
+                if (frame != null && !frame.isRecycled) {
+                    try {
+                        val viewLoc = IntArray(2)
+                        view.getLocationOnScreen(viewLoc)
+                        val left = (viewLoc[0] - rootLoc[0]).toFloat()
+                        val top = (viewLoc[1] - rootLoc[1]).toFloat()
+                        if (frame.width == view.width && frame.height == view.height) {
+                            canvas.drawBitmap(frame, left, top, paint)
+                        } else {
+                            val dest = android.graphics.RectF(
+                                left,
+                                top,
+                                left + view.width,
+                                top + view.height
+                            )
+                            canvas.drawBitmap(frame, null, dest, paint)
+                        }
+                        painted += 1
+                    } finally {
+                        frame.recycle()
+                    }
+                }
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    walk(view.getChildAt(i))
+                }
+            }
+        }
+
+        walk(root)
+        return painted
     }
 
     private fun isDeviceOwner(): Boolean {
@@ -1278,34 +1696,165 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOverlay(message: String, showPairing: Boolean) {
-        overlay.visibility = View.VISIBLE
-        statusText.text = message
-        apiBaseInput.visibility = if (showPairing) View.VISIBLE else View.GONE
-        saveApiButton.visibility = if (showPairing) View.VISIBLE else View.GONE
-        progress.visibility = View.VISIBLE
+        showBlockingOverlay(message, showSpinner = true, showApiInput = showPairing)
     }
 
     private fun hideOverlay() {
-        overlay.visibility = View.GONE
+        hideBlockingOverlay()
     }
 
-    private fun httpGetJson(url: String, authToken: String?): JSONObject? {
+    private fun showBlockingOverlay(message: String, showSpinner: Boolean = true, showApiInput: Boolean = false) {
+        overlay.visibility = View.VISIBLE
+        overlayHeadingText.text = message
+        overlaySubtitleText.visibility = View.GONE
+        pairingCodeText.visibility = View.GONE
+        pairingInstructionsText.visibility = View.GONE
+        downloadRow.visibility = View.GONE
+        statusText.text = ""
+        statusDetailText.visibility = View.GONE
+        statusDetailText.text = ""
+        progress.isIndeterminate = showSpinner
+        progress.visibility = if (showSpinner) View.VISIBLE else View.GONE
+        apiBaseInput.visibility = if (showApiInput) View.VISIBLE else View.GONE
+        saveApiButton.visibility = if (showApiInput) View.VISIBLE else View.GONE
+    }
+
+    private fun hideBlockingOverlay() {
+        overlay.visibility = View.GONE
+        progress.visibility = View.GONE
+        apiBaseInput.visibility = View.GONE
+        saveApiButton.visibility = View.GONE
+        pairingInstructionsText.visibility = View.GONE
+        overlaySubtitleText.visibility = View.GONE
+        downloadRow.visibility = View.GONE
+        statusDetailText.visibility = View.GONE
+    }
+
+    private fun showApiConfigOverlay(message: String) {
+        showBlockingOverlay(message, showSpinner = false, showApiInput = true)
+    }
+
+    private fun showPairingOverlay(code: String, message: String? = null) {
+        overlay.visibility = View.VISIBLE
+        overlayHeadingText.text = "Pairing Code"
+        overlaySubtitleText.visibility = View.GONE
+        pairingCodeText.visibility = View.VISIBLE
+        pairingCodeText.text = code
+        pairingInstructionsText.visibility = View.VISIBLE
+        downloadRow.visibility = View.GONE
+        statusDetailText.visibility = View.VISIBLE
+        statusDetailText.text = message.orEmpty()
+        progress.visibility = View.GONE
+        apiBaseInput.visibility = View.GONE
+        saveApiButton.visibility = View.GONE
+    }
+
+    private fun showPairedWaitingOverlay(screenName: String?) {
+        overlay.visibility = View.VISIBLE
+        overlayHeadingText.text = "Screen Paired"
+        overlaySubtitleText.text = screenName.orEmpty()
+        overlaySubtitleText.visibility = if (!screenName.isNullOrBlank()) View.VISIBLE else View.GONE
+        pairingCodeText.visibility = View.GONE
+        pairingInstructionsText.visibility = View.GONE
+        downloadRow.visibility = View.GONE
+        progress.visibility = View.GONE
+        apiBaseInput.visibility = View.GONE
+        saveApiButton.visibility = View.GONE
+        statusDetailText.visibility = View.VISIBLE
+        statusDetailText.text = "Waiting for content to be published..."
+    }
+
+    private fun showPairedDownloadingOverlay(screenName: String?, percent: Int) {
+        overlay.visibility = View.VISIBLE
+        overlayHeadingText.text = "Screen Paired"
+        overlaySubtitleText.text = screenName.orEmpty()
+        overlaySubtitleText.visibility = if (!screenName.isNullOrBlank()) View.VISIBLE else View.GONE
+        pairingCodeText.visibility = View.GONE
+        pairingInstructionsText.visibility = View.GONE
+        apiBaseInput.visibility = View.GONE
+        saveApiButton.visibility = View.GONE
+        progress.visibility = View.VISIBLE
+        progress.isIndeterminate = false
+        progress.progress = percent.coerceIn(0, 100)
+        downloadRow.visibility = View.VISIBLE
+        statusText.text = "Downloading Content..."
+        downloadPercentText.text = "${percent.coerceIn(0, 100)}%"
+        statusDetailText.visibility = View.GONE
+    }
+
+    private fun showUpdateOverlay(percent: Int, message: String? = null) {
+        updateOverlay.visibility = View.VISIBLE
+        updateOverlayText.text = message?.takeIf { it.isNotBlank() } ?: "Updating Content..."
+        updateOverlayProgress.progress = percent.coerceIn(0, 100)
+    }
+
+    private fun hideUpdateOverlay() {
+        updateOverlay.visibility = View.GONE
+        updateOverlayProgress.progress = 0
+    }
+
+    private fun onDownloadSnapshot(snapshot: NativeDownloadSnapshot) {
+        val total = snapshot.total.takeIf { it > 0 } ?: 0
+        val pct = if (total > 0) (snapshot.completed * 100 / total) else 0
+        when (downloadUiTarget) {
+            DownloadUiTarget.FULLSCREEN -> showPairedDownloadingOverlay(pendingScreenName, pct)
+            DownloadUiTarget.BOTTOM -> showUpdateOverlay(pct)
+            DownloadUiTarget.NONE -> {
+            }
+        }
+    }
+
+    private fun updateSystemInfoUi() {
+        val dm = resources.displayMetrics
+        sysResText.text = "Res: ${dm.widthPixels}x${dm.heightPixels}"
+        sysCoresText.text = "Cores: ${Runtime.getRuntime().availableProcessors()}"
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memInfo = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val totalGb = memInfo.totalMem.toDouble() / (1024.0 * 1024.0 * 1024.0)
+        sysMemText.text = "Memory: ${String.format(Locale.US, "%.1f", totalGb)} GB"
+        sysPlatformText.text = "Platform: Android TV"
+        sysUaText.text = "UA: Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+    }
+
+    private suspend fun httpGetJson(url: String, authToken: String?): JSONObject? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url(url)
             .apply { if (!authToken.isNullOrBlank()) header("Authorization", "Bearer $authToken") }
             .get()
             .build()
 
-        return runCatching {
+        runCatching {
             http.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return null
-                val body = res.body?.string() ?: return null
-                JSONObject(body)
+                val text = res.body?.string()
+                if (!res.isSuccessful) {
+                    NativeOpsLogger.log(
+                        this@MainActivity,
+                        "ERROR",
+                        "HTTP GET failed",
+                        JSONObject()
+                            .put("url", url)
+                            .put("status", res.code)
+                            .put("body", (text ?: "").take(800))
+                    )
+                    return@withContext null
+                }
+                if (text.isNullOrBlank()) return@withContext null
+                JSONObject(text)
             }
+        }.onFailure { t ->
+            NativeOpsLogger.log(
+                this@MainActivity,
+                "ERROR",
+                "HTTP GET exception",
+                JSONObject()
+                    .put("url", url)
+                    .put("type", t.javaClass.simpleName)
+                    .put("message", t.message ?: "")
+            )
         }.getOrNull()
     }
 
-    private fun httpPostJson(url: String, json: JSONObject, authToken: String? = null): JSONObject? {
+    private suspend fun httpPostJson(url: String, json: JSONObject, authToken: String? = null): JSONObject? = withContext(Dispatchers.IO) {
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val req = Request.Builder()
             .url(url)
@@ -1313,12 +1862,34 @@ class MainActivity : AppCompatActivity() {
             .post(body)
             .build()
 
-        return runCatching {
+        runCatching {
             http.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return null
-                val text = res.body?.string() ?: return null
+                val text = res.body?.string()
+                if (!res.isSuccessful) {
+                    NativeOpsLogger.log(
+                        this@MainActivity,
+                        "ERROR",
+                        "HTTP POST failed",
+                        JSONObject()
+                            .put("url", url)
+                            .put("status", res.code)
+                            .put("body", (text ?: "").take(800))
+                    )
+                    return@withContext null
+                }
+                if (text.isNullOrBlank()) return@withContext null
                 JSONObject(text)
             }
+        }.onFailure { t ->
+            NativeOpsLogger.log(
+                this@MainActivity,
+                "ERROR",
+                "HTTP POST exception",
+                JSONObject()
+                    .put("url", url)
+                    .put("type", t.javaClass.simpleName)
+                    .put("message", t.message ?: "")
+            )
         }.getOrNull()
     }
 
@@ -1353,6 +1924,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         persistPopQueue()
+    }
+
+    private fun enqueueAdImpression(payload: JSONObject) {
+        appScope.launch(Dispatchers.IO) {
+            val base = apiBase ?: return@launch
+            val auth = token ?: return@launch
+            val body = JSONObject().put("logs", JSONArray().put(payload))
+            httpPostJson("$base/player/ad-impression", body, authToken = auth)
+        }
     }
 
     private fun startPopFlush() {

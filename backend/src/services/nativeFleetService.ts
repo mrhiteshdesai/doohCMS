@@ -7,6 +7,7 @@ const SUPPORTED_NATIVE_COMMANDS = [
   'REBOOT',
   'REBOOT_APP',
   'REBOOT_DEVICE',
+  'UPDATE_APP',
   'SET_API_BASE',
   'SET_KIOSK',
   'SET_START_ON_BOOT',
@@ -100,6 +101,30 @@ export const normalizeNativeCommand = (command: string, payload?: any) => {
         throw new Error('PLAY_PLAYLIST requires payload.playlistId');
       }
       return { type, payload: { playlistId: data.playlistId.trim() } };
+    case 'UPDATE_APP': {
+      const apkUrl = typeof data.apkUrl === 'string' ? data.apkUrl.trim() : '';
+      const sha256 = typeof data.sha256 === 'string' ? data.sha256.trim().toLowerCase() : '';
+      const versionCode = Number(data.versionCode);
+      const versionName = typeof data.versionName === 'string' ? data.versionName.trim() : '';
+      if (!apkUrl) throw new Error('UPDATE_APP requires payload.apkUrl');
+      if (!sha256 || !/^[a-f0-9]{64}$/i.test(sha256)) {
+        throw new Error('UPDATE_APP requires payload.sha256 (64-char hex)');
+      }
+      if (!Number.isFinite(versionCode) || versionCode < 1) {
+        throw new Error('UPDATE_APP requires payload.versionCode');
+      }
+      return {
+        type,
+        payload: {
+          apkUrl,
+          sha256,
+          versionCode: Math.trunc(versionCode),
+          versionName: versionName || String(Math.trunc(versionCode)),
+          force: !!data.force,
+          releaseId: typeof data.releaseId === 'string' ? data.releaseId : undefined,
+        },
+      };
+    }
     default:
       return { type, payload: Object.keys(data).length > 0 ? data : undefined };
   }

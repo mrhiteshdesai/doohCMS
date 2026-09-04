@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get('/proof-of-play', checkPermission('report:read'), reportController.getProofOfPlay);
+router.get('/ad-impressions', checkPermission('report:read'), reportController.getAdImpressions);
 router.get('/uptime', checkPermission('report:read'), reportController.getUptimeReport);
 
 export default router;

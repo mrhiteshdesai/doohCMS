@@ -181,6 +181,23 @@ export const submitProofOfPlay = async (req: Request, res: Response) => {
   }
 };
 
+export const submitAdImpression = async (req: Request, res: Response) => {
+  try {
+    const screenId = (req as any).user.id;
+    const { submitAdImpression: saveImpression } = await import('../services/adImpressionService');
+    const body = req.body || {};
+    const logs = Array.isArray(body.logs) ? body.logs : [body];
+    const saved = [];
+    for (const entry of logs) {
+      saved.push(await saveImpression(screenId, entry));
+    }
+    res.status(200).json({ message: 'Ad impressions saved', count: saved.length });
+  } catch (error: any) {
+    console.error('AdImpression Error:', error);
+    res.status(400).json({ message: error.message });
+  }
+};
+
 export const uploadSnapshot = async (req: Request, res: Response) => {
   try {
     const screenId = (req as any).user.id;

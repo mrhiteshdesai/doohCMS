@@ -29,6 +29,11 @@ class OfflineMediaManager(
         publishTelemetry("IDLE")
     }
 
+    private fun normalizeChecksum(value: String?): String? {
+        val text = value?.trim()?.lowercase() ?: return null
+        return text.takeIf { it.isNotEmpty() && it != "null" }
+    }
+
     suspend fun rememberScreenContent(content: JSONObject) = withContext(Dispatchers.IO) {
         store.putState(KEY_LAST_SCREEN_CONTENT, content.toString())
     }
@@ -103,6 +108,20 @@ class OfflineMediaManager(
         desired.forEach { media ->
             val finalFile = finalFileFor(media)
             val existing = store.getAsset(assetKey(media))
+            // #region debug-point incoming-checksum-shape
+            if (media.sha256.equals("null", ignoreCase = true) || media.sha256.equals("\"null\"", ignoreCase = true)) {
+                NativeOpsLogger.log(
+                    context,
+                    "WARN",
+                    "Incoming media checksum looks invalid",
+                    JSONObject()
+                        .put("mediaId", media.id)
+                        .put("filename", media.filename)
+                        .put("sha256", media.sha256)
+                        .put("url", media.url)
+                )
+            }
+            // #endregion
             store.saveAsset(
                 (existing ?: offlineRecordFor(media, finalFile)).copy(
                     mediaId = media.id,
@@ -110,7 +129,7 @@ class OfflineMediaManager(
                     mimeType = media.mimeType,
                     localPath = finalFile.absolutePath,
                     expectedSize = media.sizeBytes,
-                    checksumSha256 = media.sha256 ?: existing?.checksumSha256,
+                    checksumSha256 = normalizeChecksum(media.sha256) ?: normalizeChecksum(existing?.checksumSha256),
                     lastSeenAt = now,
                     updatedAt = now
                 )
@@ -184,12 +203,38 @@ class OfflineMediaManager(
 
             val result = downloadOnce(media, updatedRecord)
             if (result.success) {
-                val expectedSha256 = media.sha256?.lowercase()
-                val actualSha256 = result.checksumSha256?.lowercase()
+                val expectedSha256 = normalizeChecksum(media.sha256)
+                val actualSha256 = normalizeChecksum(result.checksumSha256)
+                // #region debug-point checksum-compare
+                if (expectedSha256 != null) {
+                    NativeOpsLogger.log(
+                        context,
+                        "INFO",
+                        "Checksum verification input",
+                        JSONObject()
+                            .put("mediaId", media.id)
+                            .put("filename", media.filename)
+                            .put("expectedSha256", expectedSha256)
+                            .put("actualSha256", actualSha256)
+                    )
+                }
+                // #endregion
                 if (expectedSha256 != null && actualSha256 != expectedSha256) {
                     if (finalFile.exists()) {
                         finalFile.delete()
                     }
+                    // #region debug-point checksum-mismatch
+                    NativeOpsLogger.log(
+                        context,
+                        "ERROR",
+                        "Checksum mismatch during download validation",
+                        JSONObject()
+                            .put("mediaId", media.id)
+                            .put("filename", media.filename)
+                            .put("expectedSha256", expectedSha256)
+                            .put("actualSha256", actualSha256)
+                    )
+                    // #endregion
                     store.saveAsset(
                         (store.getAsset(key) ?: updatedRecord).copy(
                             state = STATE_FAILED,
@@ -263,7 +308,7 @@ class OfflineMediaManager(
             return false
         }
 
-        val checksum = record.checksumSha256
+        val checksum = normalizeChecksum(record.checksumSha256)
         val needsVerification = checksum != null && (
             record.lastVerifiedAt == null ||
                 System.currentTimeMillis() - record.lastVerifiedAt > CHECKSUM_VERIFY_INTERVAL_MS
@@ -507,7 +552,7 @@ class OfflineMediaManager(
             state = STATE_PENDING,
             expectedSize = media.sizeBytes,
             verifiedSize = null,
-            checksumSha256 = media.sha256?.lowercase(),
+            checksumSha256 = normalizeChecksum(media.sha256),
             retryCount = 0,
             lastError = null,
             lastSeenAt = System.currentTimeMillis(),
