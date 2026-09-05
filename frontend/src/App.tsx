@@ -21,6 +21,7 @@ import Profile from './pages/Profile';
 import UptimeReport from './pages/Reports/UptimeReport';
 import HeartbeatReport from './pages/Reports/HeartbeatReport';
 import ProofOfPlayReport from './pages/Reports/ProofOfPlayReport';
+import AdImpressionsReport from './pages/Reports/AdImpressionsReport';
 import AppReleases from './pages/AppReleases';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
@@ -59,6 +60,7 @@ function App() {
               <Route path="/reports/uptime" element={<UptimeReport />} />
               <Route path="/reports/heartbeat" element={<HeartbeatReport />} />
               <Route path="/reports/proof-of-play" element={<ProofOfPlayReport />} />
+              <Route path="/reports/ad-impressions" element={<AdImpressionsReport />} />
               <Route path="/app-releases" element={<AppReleases />} />
               <Route path="/settings" element={<Settings />} />
             </Route>

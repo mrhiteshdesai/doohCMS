@@ -251,80 +251,6 @@ const ScreenDetails = () => {
           </div>
         </div>
         <div className="flex space-x-2">
-            {/* Remote Commands Dropdown or Buttons */}
-            <div className="flex gap-2">
-                {isNativePlayer ? (
-                  <>
-                    <button 
-                        onClick={() => handleCommand('REBOOT_APP')}
-                        disabled={commandLoading}
-                        className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
-                        title="Restart Native App"
-                    >
-                        <Power size={18} className="mr-1" />
-                        Reboot App
-                    </button>
-                    <button 
-                        onClick={() => handleCommand('REBOOT_DEVICE')}
-                        disabled={commandLoading}
-                        className="flex items-center px-3 py-2 bg-red-100 text-red-800 rounded-lg hover:bg-red-200 disabled:opacity-50"
-                        title="Reboot Device"
-                    >
-                        <Power size={18} className="mr-1" />
-                        Reboot Device
-                    </button>
-                  </>
-                ) : (
-                  <button 
-                      onClick={() => handleCommand('REBOOT')}
-                      disabled={commandLoading}
-                      className="flex items-center px-3 py-2 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 disabled:opacity-50"
-                      title="Reboot Device"
-                  >
-                      <Power size={18} className="mr-1" />
-                      Reboot
-                  </button>
-                )}
-                <button 
-                    onClick={() => handleCommand('RELOAD')}
-                    disabled={commandLoading}
-                    className="flex items-center px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 disabled:opacity-50"
-                    title="Reload Content"
-                >
-                    <RefreshCw size={18} className="mr-1" />
-                    Reload
-                </button>
-                <button 
-                    onClick={() => handleCommand('SNAPSHOT')}
-                    disabled={commandLoading}
-                    className="flex items-center px-3 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 disabled:opacity-50"
-                    title="Request Snapshot"
-                >
-                    <Camera size={18} className="mr-1" />
-                    Snapshot
-                </button>
-                {isNativePlayer && (
-                  <button 
-                      onClick={() => handleCommand('EXPORT_SUPPORT_BUNDLE')}
-                      disabled={commandLoading}
-                      className="flex items-center px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 disabled:opacity-50"
-                      title="Export Support Bundle"
-                  >
-                      <Database size={18} className="mr-1" />
-                      Support Bundle
-                  </button>
-                )}
-                 <button 
-                    onClick={() => handleCommand('CLEAR_CACHE')}
-                    disabled={commandLoading}
-                    className="flex items-center px-3 py-2 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 disabled:opacity-50"
-                    title="Clear Cache"
-                >
-                    <Trash2 size={18} className="mr-1" />
-                    Clear Cache
-                </button>
-            </div>
-
           <button 
             onClick={fetchScreen}
             className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
@@ -335,7 +261,7 @@ const ScreenDetails = () => {
         </div>
       </div>
 
-      {/* Quick Actions Bar */}
+      {/* Quick Actions Bar (canonical remote-command controls; header duplicates removed) */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-4 justify-end">
         <button 
           onClick={() => handleCommand(isNativePlayer ? 'REBOOT_APP' : 'REBOOT')}
@@ -380,6 +306,16 @@ const ScreenDetails = () => {
         >
           <Camera size={18} className="mr-2" /> Take Snapshot
         </button>
+        {isNativePlayer && (
+          <button 
+            onClick={() => handleCommand('EXPORT_SUPPORT_BUNDLE')}
+            disabled={commandLoading}
+            className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+            title="Export Support Bundle"
+          >
+            <Database size={18} className="mr-2" /> Support Bundle
+          </button>
+        )}
       </div>
 
       {/* Tabs */}

@@ -74,10 +74,20 @@ export const getAdImpressions = async (req: Request, res: Response) => {
     const { tenantId } = (req as any).user;
     const { startDate, endDate, screenId } = req.query;
     const { listAdImpressions } = await import('../services/adImpressionService');
+    const parseDayStart = (raw?: string) => {
+      if (!raw) return undefined;
+      if (raw.includes('T')) return new Date(raw);
+      return new Date(`${raw}T00:00:00.000`);
+    };
+    const parseDayEnd = (raw?: string) => {
+      if (!raw) return undefined;
+      if (raw.includes('T')) return new Date(raw);
+      return new Date(`${raw}T23:59:59.999`);
+    };
     const logs = await listAdImpressions(tenantId, {
       screenId: screenId ? String(screenId) : undefined,
-      from: startDate ? new Date(String(startDate)) : undefined,
-      to: endDate ? new Date(String(endDate)) : undefined,
+      from: parseDayStart(startDate ? String(startDate) : undefined),
+      to: parseDayEnd(endDate ? String(endDate) : undefined),
       limit: 1000,
     });
     res.json(

@@ -23,6 +23,7 @@ import {
   Activity,
   HeartPulse,
   FileCheck,
+  Megaphone,
   Tag,
   Package
 } from 'lucide-react';
@@ -95,6 +96,7 @@ const DashboardLayout = () => {
         { name: 'Uptime Report', path: '/reports/uptime', icon: <Activity size={20} /> },
         { name: 'Heartbeat Report', path: '/reports/heartbeat', icon: <HeartPulse size={20} /> },
         { name: 'Proof of Play', path: '/reports/proof-of-play', icon: <FileCheck size={20} /> },
+        { name: 'Ad Impressions', path: '/reports/ad-impressions', icon: <Megaphone size={20} /> },
       ]
     },
     { name: 'App Releases', path: '/app-releases', icon: <Package size={20} />, module: 'screen' },

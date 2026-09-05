@@ -73,6 +73,8 @@ const supportBundleUpload = multer({
     const allowed =
       file.mimetype === 'application/zip' ||
       file.mimetype === 'application/x-zip-compressed' ||
+      file.mimetype === 'application/octet-stream' ||
+      file.originalname?.toLowerCase().endsWith('.zip') ||
       file.mimetype === 'application/json' ||
       file.mimetype.startsWith('text/');
     if (allowed) {

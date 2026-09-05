@@ -9,10 +9,14 @@ import android.content.pm.PackageManager
 import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.TextPaint
 import android.view.KeyEvent
 import android.view.TextureView
 import android.view.View
@@ -28,6 +32,10 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import androidx.appcompat.widget.SwitchCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +56,6 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.time.Instant
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -127,6 +134,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingWidgetRuntimeEnv: WidgetRuntimeEnv? = null
     private var pendingScreenLocation: ScreenLocationModel? = null
     private var pendingScreenName: String? = null
+    private var currentScreenName: String? = null
     private var lastRecoveryAttemptAt: Long = 0L
     private var widgetRuntimeEnv: WidgetRuntimeEnv = WidgetRuntimeEnv()
     private var screenLocation: ScreenLocationModel? = null
@@ -140,6 +148,7 @@ class MainActivity : AppCompatActivity() {
     private val prefsPendingOtaCommandId = KioskPrefs.KEY_PENDING_OTA_COMMAND_ID
     private val prefsPendingOtaTargetVersion = KioskPrefs.KEY_PENDING_OTA_TARGET_VERSION
     private val prefsPendingOtaTargetCode = KioskPrefs.KEY_PENDING_OTA_TARGET_CODE
+    private val prefsPendingRebootCommandId = KioskPrefs.KEY_PENDING_REBOOT_COMMAND_ID
     private var installReceiver: AppUpdateManager.InstallResultReceiver? = null
     private var otaInProgress = false
     private val popQueue: MutableList<JSONObject> = mutableListOf()
@@ -344,7 +353,7 @@ class MainActivity : AppCompatActivity() {
             prefsNow.edit().putLong(prefsTechUnlockedUntil, until).apply()
             settingsTechPin.setText("")
             updateSettingsAccessUi()
-            Toast.makeText(this, "Settings unlocked", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Settings unlocked for 10 minutes. Use Exit App to leave.", Toast.LENGTH_LONG).show()
         }
 
         settingsChangePin.setOnClickListener {
@@ -368,13 +377,12 @@ class MainActivity : AppCompatActivity() {
 
         settingsExit.setOnClickListener {
             if (!checkSettingsAccessOrToast()) return@setOnClickListener
-            settingsKiosk.isChecked = false
-            applyKioskMode(false)
-            finish()
+            exitPlayer()
         }
 
         hideSystemUI()
         startReliabilityMonitor()
+        restorePendingRebootAck()
         appScope.launch { performStartupSequence(forceRepair = false) }
         if (isRecoveryModeActive()) {
             Toast.makeText(this, "Recovery mode active. Kiosk enforcement is temporarily relaxed.", Toast.LENGTH_LONG).show()
@@ -531,10 +539,16 @@ class MainActivity : AppCompatActivity() {
         val kioskEnabled = prefs().getBoolean(prefsKioskEnabled, false)
         val unlocked = isSettingsUnlocked()
         val recoveryActive = isRecoveryModeActive()
+        val unlockUntil = prefs().getLong(prefsTechUnlockedUntil, 0L)
+        val unlockMinutesLeft = if (unlocked) {
+            ((unlockUntil - System.currentTimeMillis()) / 60_000L).coerceAtLeast(1L)
+        } else {
+            0L
+        }
         val accessText = when {
             recoveryActive -> "Access: Recovery Window"
-            !kioskEnabled -> "Access: Open"
-            unlocked -> "Access: Unlocked"
+            !kioskEnabled -> "Access: Open (kiosk off)"
+            unlocked -> "Access: Unlocked (~${unlockMinutesLeft}m left)"
             !hasConfiguredTechPin() -> "Access: Locked (set technician PIN)"
             !isStrongTechPin() -> "Access: Locked (PIN must be 6+ digits)"
             else -> "Access: Locked"
@@ -548,7 +562,9 @@ class MainActivity : AppCompatActivity() {
         settingsClearCache.isEnabled = allowControls
         settingsRepair.isEnabled = allowControls
         settingsRecovery.isEnabled = allowControls
+        // Exit App only when unlocked / open / recovery — never via Back.
         settingsExit.isEnabled = allowControls
+        settingsExit.visibility = if (allowControls) View.VISIBLE else View.GONE
         settingsChangePin.isEnabled = !kioskEnabled || unlocked || !hasConfiguredTechPin()
     }
 
@@ -856,6 +872,7 @@ class MainActivity : AppCompatActivity() {
             tenantNewsFeedUrls = screenContent.newsFeedUrls
         )
         screenLocation = screenContent.location
+        currentScreenName = screenContent.name
         currentPlaylistId = playlist.id
         currentPlaylistFingerprint = screenContentFingerprint(screenContent)
         telemetry.markPlaybackState("RECOVERING")
@@ -941,6 +958,10 @@ class MainActivity : AppCompatActivity() {
         currentScreenContentJson = JSONObject(screenContentJson.toString())
         widgetRuntimeEnv = widgetEnv
         screenLocation = location
+        currentScreenName = when {
+            !screenContentJson.isNull("name") -> screenContentJson.optString("name").takeIf { it.isNotBlank() }
+            else -> null
+        } ?: pendingScreenName
         currentPlaylistId = playlist.id
         currentPlaylistFingerprint = fingerprint
         pendingPlaylist = null
@@ -1147,8 +1168,16 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 "REBOOT", "REBOOT_APP" -> {
-                    if (id.isNotBlank()) queueCommandUpdate(id, "COMPLETED", "App restarted")
-                    recreate()
+                    // Must ACK over heartbeat BEFORE recreate(); otherwise CMS keeps
+                    // self-healing SENT → PENDING and the device reboot-loops every ~2 min.
+                    appScope.launch {
+                        if (id.isNotBlank()) {
+                            queueCommandUpdate(id, "COMPLETED", "App restarted")
+                            prefs().edit().putString(prefsPendingRebootCommandId, id).apply()
+                            flushCommandUpdatesNow()
+                        }
+                        withContext(Dispatchers.Main) { recreate() }
+                    }
                 }
                 "REBOOT_DEVICE" -> {
                     val rebooted = runCatching {
@@ -1358,6 +1387,55 @@ class MainActivity : AppCompatActivity() {
             .put("id", id)
             .put("status", status)
             .put("message", message))
+    }
+
+    private fun restorePendingRebootAck() {
+        val pendingId = prefs().getString(prefsPendingRebootCommandId, null) ?: return
+        if (pendingId.isBlank()) return
+        queueCommandUpdate(pendingId, "COMPLETED", "App restarted")
+        prefs().edit().remove(prefsPendingRebootCommandId).apply()
+    }
+
+    private suspend fun flushCommandUpdatesNow() {
+        val base = apiBase ?: return
+        val auth = token ?: return
+        val updates = synchronized(commandUpdates) {
+            if (commandUpdates.isEmpty()) null else JSONArray(commandUpdates.map { JSONObject(it.toString()) })
+        } ?: return
+
+        val payload = telemetry.snapshot(
+            currentPlaylistId = currentPlaylistId,
+            apiBase = apiBase,
+            kioskEnabled = prefs().getBoolean(prefsKioskEnabled, false),
+            startOnBoot = prefs().getBoolean(prefsStartOnBoot, true),
+            isDeviceOwner = isDeviceOwner(),
+            deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID),
+            appVersion = appVersion
+        )
+        payload.put("commandUpdates", updates)
+
+        val res = httpPostJson("$base/player/heartbeat", payload, authToken = auth)
+        if (res != null) {
+            synchronized(commandUpdates) { commandUpdates.clear() }
+            prefs().edit().remove(prefsPendingRebootCommandId).apply()
+            NativeOpsLogger.log(this, "INFO", "Flushed command updates before reboot", JSONObject().put("count", updates.length()))
+        } else {
+            NativeOpsLogger.log(this, "WARN", "Failed to flush command updates before reboot")
+        }
+    }
+
+    private fun exitPlayer() {
+        settingsKiosk.isChecked = false
+        applyKioskMode(false)
+        KioskGuardianService.stop(this)
+        KioskWatchdogReceiver.cancel(this)
+        prefs().edit().putBoolean(prefsKioskEnabled, false).apply()
+        runCatching { stopLockTask() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            finishAndRemoveTask()
+        } else {
+            finish()
+        }
     }
 
     private fun buildTelemetrySnapshot(): JSONObject = telemetry.snapshot(
@@ -1570,6 +1648,7 @@ class MainActivity : AppCompatActivity() {
                 // ExoPlayer TextureView frames are GPU surfaces — Canvas.draw leaves them black.
                 // Patch those regions with TextureView.getBitmap() at their on-screen offsets.
                 val textureFrames = drawTextureViewsOnto(target, canvas)
+                drawSnapshotInfoOverlay(canvas, width, height)
                 NativeOpsLogger.log(
                     this,
                     "INFO",
@@ -1578,6 +1657,88 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }.getOrNull()
+    }
+
+    private fun drawSnapshotInfoOverlay(canvas: Canvas, width: Int, height: Int) {
+        val density = resources.displayMetrics.density
+        val pad = 16f * density
+        val gap = 6f * density
+        val corner = 12f * density
+        val margin = 20f * density
+
+        val screenName = currentScreenName
+            ?: currentScreenContentJson?.optString("name")?.takeIf { it.isNotBlank() }
+            ?: "Unknown Screen"
+        val screenId = prefs().getString(prefsLastPairingCode, null)
+            ?: prefs().getString(prefsLastScreenId, null)
+            ?: "N/A"
+        val location = screenLocation?.name?.takeIf { it.isNotBlank() }
+            ?: listOfNotNull(
+                screenLocation?.latitude?.let { String.format(Locale.US, "%.4f", it) },
+                screenLocation?.longitude?.let { String.format(Locale.US, "%.4f", it) }
+            ).joinToString(", ").ifBlank { "Unknown Location" }
+        val timestamp = SimpleDateFormat("MMM d, yyyy, h:mm:ss a", Locale.getDefault())
+            .apply { timeZone = TimeZone.getDefault() }
+            .format(Date())
+
+        val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 18f * density
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 14f * density
+            alpha = 230
+        }
+        val timePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 12f * density
+            alpha = 180
+        }
+
+        val lines = listOf(
+            screenName to titlePaint,
+            "ID: $screenId" to bodyPaint,
+            location to bodyPaint,
+            timestamp to timePaint
+        )
+        val textWidth = lines.maxOf { (text, paint) -> paint.measureText(text) }
+        val textHeight = lines.sumOf { (_, paint) ->
+            (paint.fontMetrics.bottom - paint.fontMetrics.top).toDouble()
+        }.toFloat() + gap * (lines.size - 1) + gap
+
+        val boxWidth = textWidth + pad * 2
+        val boxHeight = textHeight + pad * 2
+        val left = (width - boxWidth - margin).coerceAtLeast(margin)
+        val top = (height - boxHeight - margin).coerceAtLeast(margin)
+        val rect = RectF(left, top, left + boxWidth, top + boxHeight)
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(191, 0, 0, 0)
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(rect, corner, corner, bgPaint)
+
+        var y = top + pad
+        lines.forEachIndexed { index, (text, paint) ->
+            val fm = paint.fontMetrics
+            y -= fm.top
+            canvas.drawText(text, left + pad, y, paint)
+            y += fm.bottom
+            if (index == lines.lastIndex - 1) {
+                // Divider above timestamp
+                y += gap / 2
+                val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.argb(51, 255, 255, 255)
+                    strokeWidth = 1f * density
+                }
+                canvas.drawLine(left + pad, y, left + boxWidth - pad, y, linePaint)
+                y += gap / 2
+            } else if (index < lines.lastIndex) {
+                y += gap
+            }
+        }
     }
 
     /**
@@ -1911,6 +2072,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enqueuePop(mediaId: String, playlistId: String?, startedAtMs: Long, durationSeconds: Int) {
+        // VAST/AD_SLOT uses synthetic media ids (vast-*) that are not MediaFile rows —
+        // backend rejects them. Those plays are tracked via AdImpression instead.
+        if (mediaId.startsWith("vast-")) {
+            NativeOpsLogger.log(
+                this,
+                "INFO",
+                "Skipping PoP for synthetic VAST media",
+                JSONObject().put("mediaId", mediaId).put("playlistId", playlistId ?: JSONObject.NULL)
+            )
+            return
+        }
         val entry = JSONObject().apply {
             put("mediaId", mediaId)
             put("playlistId", playlistId ?: JSONObject.NULL)
@@ -1924,6 +2096,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         persistPopQueue()
+        NativeOpsLogger.log(
+            this,
+            "INFO",
+            "PoP enqueued",
+            JSONObject()
+                .put("mediaId", mediaId)
+                .put("playlistId", playlistId ?: JSONObject.NULL)
+                .put("duration", durationSeconds)
+                .put("queueSize", popQueue.size)
+        )
     }
 
     private fun enqueueAdImpression(payload: JSONObject) {
@@ -1931,7 +2113,13 @@ class MainActivity : AppCompatActivity() {
             val base = apiBase ?: return@launch
             val auth = token ?: return@launch
             val body = JSONObject().put("logs", JSONArray().put(payload))
-            httpPostJson("$base/player/ad-impression", body, authToken = auth)
+            val res = httpPostJson("$base/player/ad-impression", body, authToken = auth)
+            NativeOpsLogger.log(
+                this@MainActivity,
+                if (res != null) "INFO" else "ERROR",
+                if (res != null) "AdImpression uploaded" else "AdImpression upload failed",
+                payload
+            )
         }
     }
 
@@ -1957,6 +2145,22 @@ class MainActivity : AppCompatActivity() {
         if (res != null) {
             synchronized(popQueue) { popQueue.clear() }
             persistPopQueue()
+            NativeOpsLogger.log(
+                this,
+                "INFO",
+                "PoP flushed",
+                JSONObject()
+                    .put("sent", batch.length())
+                    .put("saved", res.optInt("count", -1))
+                    .put("received", res.optInt("received", -1))
+            )
+        } else {
+            NativeOpsLogger.log(
+                this,
+                "ERROR",
+                "PoP flush failed",
+                JSONObject().put("queued", batch.length())
+            )
         }
     }
 

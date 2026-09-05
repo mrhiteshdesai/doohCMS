@@ -353,8 +353,8 @@ Paste (edit password, JWT, keep domains as below):
 ```env
 NODE_ENV=production
 PORT=3000
-DATABASE_URL=postgresql://postgres:CHANGE_ME_TO_A_STRONG_PASSWORD@127.0.0.1:5432/smartags?schema=public
-JWT_SECRET=PASTE_A_LONG_RANDOM_STRING_AT_LEAST_32_CHARACTERS
+DATABASE_URL=postgresql://postgres:%40002550641646Hitesh@127.0.0.1:5432/smartags?schema=public
+JWT_SECRET=BHj3XYpQn8DoaC1rcREI7lxG0sSzt2dO6y4FwNMueh9J5fUL
 CORS_ORIGINS=https://cms.brandeagles.com
 TRUST_PROXY=true
 ALLOW_PUBLIC_REGISTRATION=false

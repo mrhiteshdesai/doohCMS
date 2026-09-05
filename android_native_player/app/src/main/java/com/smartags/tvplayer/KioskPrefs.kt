@@ -21,6 +21,7 @@ object KioskPrefs {
     const val KEY_PENDING_OTA_COMMAND_ID = "pending_ota_command_id"
     const val KEY_PENDING_OTA_TARGET_VERSION = "pending_ota_target_version"
     const val KEY_PENDING_OTA_TARGET_CODE = "pending_ota_target_code"
+    const val KEY_PENDING_REBOOT_COMMAND_ID = "pending_reboot_command_id"
 
     fun prefs(context: Context): SharedPreferences =
         storageContext(context).getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

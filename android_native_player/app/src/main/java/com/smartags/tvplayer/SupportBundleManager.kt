@@ -43,7 +43,7 @@ object SupportBundleManager {
             appVersion = appVersion
         ) ?: return false
 
-        return uploadBundle(httpClient, apiBase, authToken, bundleFile)
+        return uploadBundle(context, httpClient, apiBase, authToken, bundleFile)
     }
 
     private fun buildBundle(
@@ -141,6 +141,7 @@ object SupportBundleManager {
     }
 
     private fun uploadBundle(
+        context: Context,
         httpClient: OkHttpClient,
         apiBase: String,
         authToken: String,
@@ -161,6 +162,23 @@ object SupportBundleManager {
             .post(body)
             .build()
 
-        httpClient.newCall(request).execute().use { response -> response.isSuccessful }
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IllegalStateException("HTTP ${response.code}: ${body.take(500)}")
+            }
+            true
+        }
+    }.onFailure { err ->
+        runCatching {
+            NativeOpsLogger.log(
+                context,
+                "ERROR",
+                "Support bundle upload failed",
+                JSONObject()
+                    .put("type", err.javaClass.simpleName)
+                    .put("message", err.message ?: "")
+            )
+        }
     }.getOrDefault(false)
 }

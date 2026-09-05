@@ -330,6 +330,16 @@ export const processHeartbeat = async (screenId: string, metadata?: any) => {
   
   history.forEach((cmd: any) => {
       if (cmd.status === 'SENT' && new Date(cmd.updatedAt) < twoMinutesAgo) {
+          // REBOOT_APP/REBOOT recreate the activity before heartbeat can ACK →
+          // re-queueing causes an infinite restart loop. Assume success instead.
+          if (cmd.type === 'REBOOT_APP' || cmd.type === 'REBOOT') {
+              console.log(`[Heartbeat] Assuming completed stuck reboot ${cmd.id} (${cmd.type})`);
+              cmd.status = 'COMPLETED';
+              cmd.message = cmd.message || 'Assumed completed after app restart (ack lost)';
+              cmd.updatedAt = new Date();
+              historyChanged = true;
+              return;
+          }
           console.log(`[Heartbeat] Re-queuing stuck command ${cmd.id} (${cmd.type})`);
           cmd.status = 'PENDING';
           cmd.updatedAt = new Date();

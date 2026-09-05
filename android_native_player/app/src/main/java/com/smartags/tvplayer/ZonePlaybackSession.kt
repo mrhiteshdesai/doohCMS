@@ -216,7 +216,8 @@ class ZonePlaybackSession(
         )
         val cappedItem = item.copy(duration = slotSec, media = synthetic, type = "AD_SLOT")
         val startedAtMs = System.currentTimeMillis()
-        val played = playVideo(cappedItem, synthetic, null)
+        // reportPop=false: synthetic vast-* ids are not MediaFile rows; AdImpression covers ads.
+        val played = playVideo(cappedItem, synthetic, null, reportPop = false)
         val elapsedSec = ((System.currentTimeMillis() - startedAtMs) / 1000L).toInt().coerceAtLeast(1)
 
         if (played) {
@@ -305,7 +306,12 @@ class ZonePlaybackSession(
         }
     }
 
-    private suspend fun playVideo(item: PlaylistEntryModel, media: MediaFileModel, file: File?): Boolean {
+    private suspend fun playVideo(
+        item: PlaylistEntryModel,
+        media: MediaFileModel,
+        file: File?,
+        reportPop: Boolean = true
+    ): Boolean {
         val localFile = file?.takeIf { it.exists() && it.length() > 0L }
         val sourceUri = when {
             localFile != null -> Uri.fromFile(localFile)
@@ -419,7 +425,9 @@ class ZonePlaybackSession(
 
         val elapsedSeconds = ((System.currentTimeMillis() - startedAtMs) / 1000L).toInt().coerceAtLeast(1)
         onPlaybackSuccess(zone.id, media.id, playlist.id)
-        onProofOfPlay(media.id, playlist.id, startedAtMs, min(elapsedSeconds, item.duration.coerceAtLeast(1)))
+        if (reportPop) {
+            onProofOfPlay(media.id, playlist.id, startedAtMs, min(elapsedSeconds, item.duration.coerceAtLeast(1)))
+        }
         return true
     }
 
