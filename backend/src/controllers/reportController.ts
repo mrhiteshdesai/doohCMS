@@ -6,14 +6,27 @@ export const getProofOfPlay = async (req: Request, res: Response) => {
     const { tenantId } = (req as any).user;
     const { startDate, endDate, screenId, mediaId } = req.query;
 
+    const parseDayStart = (raw?: string) => {
+      if (!raw) return undefined;
+      if (raw.includes('T')) return new Date(raw);
+      return new Date(`${raw}T00:00:00.000`);
+    };
+    const parseDayEnd = (raw?: string) => {
+      if (!raw) return undefined;
+      if (raw.includes('T')) return new Date(raw);
+      return new Date(`${raw}T23:59:59.999`);
+    };
+
     const where: any = {
       tenantId,
     };
 
-    if (startDate && endDate) {
+    const from = parseDayStart(startDate ? String(startDate) : undefined);
+    const to = parseDayEnd(endDate ? String(endDate) : undefined);
+    if (from || to) {
       where.startedAt = {
-        gte: new Date(startDate as string),
-        lte: new Date(endDate as string),
+        ...(from ? { gte: from } : {}),
+        ...(to ? { lte: to } : {}),
       };
     }
 
@@ -52,9 +65,9 @@ export const getProofOfPlay = async (req: Request, res: Response) => {
 
     const report = logs.map(log => ({
       id: log.id,
-      mediaName: log.media.name,
+      mediaName: log.media?.name || 'Unknown media',
       playlistName: log.playlist?.name || 'N/A',
-      screenName: log.screen.name,
+      screenName: log.screen?.name || log.screenId,
       screenId: log.screenId,
       startedAt: log.startedAt,
       endedAt: new Date(log.startedAt.getTime() + log.duration * 1000),
